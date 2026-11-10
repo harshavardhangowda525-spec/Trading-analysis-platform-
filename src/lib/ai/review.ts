@@ -159,7 +159,7 @@ export function buildReview(
 
 export function deterministicNarrative(t: ClosedTrade, r: Omit<TradeReview, "narrative" | "narrativeSource" | "model">): string {
   const verb = t.grossPnl < 0 ? "lost" : t.grossPnl > 0 ? "gained" : "ended flat at";
-  const parts = [`Your trade ${verb} ${Math.abs(t.returnPct).toFixed(1)}% before charges (gross ${fmt(t.grossPnl)}, net ${fmt(t.netPnl)}).`];
+  const parts = [`Your trade ${verb} ${Math.abs(t.returnPct).toFixed(Math.abs(t.returnPct) < 0.1 ? 2 : 1)}% before charges (gross ${fmt(t.grossPnl)}, net ${fmt(t.netPnl)}).`];
   const sma = r.possibleFactors.find((f) => f.key === "sma");
   if (sma) parts.push(sma.text);
   if (r.missingInformation.find((m) => m.key === "stop") && r.missingInformation.find((m) => m.key === "rationale"))

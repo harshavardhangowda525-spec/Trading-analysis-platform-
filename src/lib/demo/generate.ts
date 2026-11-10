@@ -211,7 +211,8 @@ export function demoCandles(
     const end = addDays(localDate(exitAt), 10);
     for (; d <= end; d = addDays(d, 1)) if (![0, 6].includes(weekdayOf(d))) times.push(Date.parse(zonedToUtc(d, "09:15:00")) / 1000);
   } else {
-    let d = localDate(entryAt);
+    let d = addDays(localDate(entryAt), -1);
+    while ([0, 6].includes(weekdayOf(d))) d = addDays(d, -1); // previous session as context
     const end = localDate(exitAt);
     for (; d <= end; d = addDays(d, 1)) {
       if ([0, 6].includes(weekdayOf(d))) continue;

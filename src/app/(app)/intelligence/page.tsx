@@ -23,7 +23,7 @@ export default async function IntelligencePage({ searchParams }: { searchParams:
         <Badge tone={llm ? "pos" : "neutral"}>{llm ? "Groq LLM connected" : "Deterministic mode (no LLM key)"}</Badge>
       </PageTitle>
       <div className="grid gap-4 lg:grid-cols-5">
-        <Panel className="lg:col-span-3">
+        <Panel className="flex flex-col lg:sticky lg:top-20 lg:col-span-3 lg:h-[calc(100dvh-140px)] lg:self-start">
           <PanelHeader icon={<MessageSquareText className="size-4" />} title="TRADEOS Coach" subtitle="Grounded in your stored trades — sources and periods shown for every answer" />
           <Coach llm={llm} />
         </Panel>

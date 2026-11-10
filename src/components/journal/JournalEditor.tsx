@@ -171,7 +171,7 @@ export function JournalEditor({ tradeKey, initial, strategies, mode, attachments
           </label>
         </div>
       </div>
-      <div className="sticky bottom-24 z-10 flex items-center gap-3 lg:bottom-4">
+      <div className="sticky bottom-24 z-10 flex items-center gap-3 lg:static">
         <Button variant="primary" size="lg" onClick={save} disabled={state === "saving"} className="flex-1 sm:flex-none">
           {state === "saving" ? <Loader2 className="size-4 animate-spin" /> : state === "saved" ? <Check className="size-4" /> : <Save className="size-4" />}
           {state === "saved" ? "Saved" : "Save journal"}

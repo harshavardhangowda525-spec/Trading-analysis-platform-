@@ -54,7 +54,7 @@ export function CsvImport({ enabled }: { enabled: boolean }) {
         <span className="text-sm font-semibold">{busy ? "Validating & importing…" : "Drop a tradebook CSV or tap to choose"}</span>
         <span className="text-xs text-text-3">Zerodha Console → Reports → Tradebook (Equity), or TRADEOS generic CSV · max 5 MB</span>
       </button>
-      <input ref={input} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+      <input ref={input} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) upload(f); }} />
       {!enabled && <p className="mt-2 text-xs text-text-3">Sign in to import your own history (demo data is read-only).</p>}
       {res && (
         <div className={cn("mt-3 rounded-2xl border p-4 text-xs", res.ok ? "border-pos/25 bg-pos/[0.05]" : "border-neg/25 bg-neg/[0.05]")} role="status">

@@ -8,6 +8,10 @@ import { cn, inr } from "@/lib/utils";
 interface Candle { time: number; open: number; high: number; low: number; close: number; volume: number }
 interface TradeInfo { tradeKey: string; symbol: string; direction: "LONG" | "SHORT"; quantity: number; avgEntry: number; avgExit: number; entryAt: string; exitAt: string; plannedStop: number | null; plannedTarget: number | null; netPnl: number }
 
+/** lightweight-charts renders UTC; shift by +05:30 so the axis reads exchange (IST) time. */
+const IST = 19800;
+const T = (t: number) => (t + IST) as Time;
+
 const INTERVALS = [
   { id: "1minute", label: "1m" },
   { id: "5minute", label: "5m" },
@@ -83,7 +87,7 @@ export function ReplayChart({ trade }: { trade: TradeInfo }) {
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderColor: "rgba(255,255,255,0.08)" },
       timeScale: { borderColor: "rgba(255,255,255,0.08)", timeVisible: true, secondsVisible: false },
-      localization: { timeFormatter: (t: number) => new Date(t * 1000).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }) },
+      localization: { timeFormatter: (t: number) => new Date(t * 1000).toLocaleString("en-IN", { timeZone: "UTC", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }) },
     });
     const s = c.addCandlestickSeries({ upColor: "#22a37a", downColor: "#d9532f", borderVisible: false, wickUpColor: "#22a37a", wickDownColor: "#d9532f" });
     chart.current = c;
@@ -100,7 +104,7 @@ export function ReplayChart({ trade }: { trade: TradeInfo }) {
   useEffect(() => {
     const s = series.current;
     if (!s) return;
-    s.setData(candles.map((c) => ({ ...c, time: c.time as Time })));
+    s.setData(candles.map((c) => ({ ...c, time: T(c.time) })));
     for (const l of priceLines.current) s.removePriceLine(l);
     const lines: ReturnType<typeof s.createPriceLine>[] = [];
     if (meta && candles.length > meta.entryIndex) {
@@ -111,9 +115,9 @@ export function ReplayChart({ trade }: { trade: TradeInfo }) {
     priceLines.current = lines;
     const markers: SeriesMarker<Time>[] = [];
     if (meta && candles.length > meta.entryIndex)
-      markers.push({ time: candles[meta.entryIndex].time as Time, position: trade.direction === "LONG" ? "belowBar" : "aboveBar", color: "#7cc4ff", shape: trade.direction === "LONG" ? "arrowUp" : "arrowDown", text: `${trade.direction === "LONG" ? "BUY" : "SELL"} ${trade.quantity} @ ${trade.avgEntry}` });
+      markers.push({ time: T(candles[meta.entryIndex].time), position: trade.direction === "LONG" ? "belowBar" : "aboveBar", color: "#7cc4ff", shape: trade.direction === "LONG" ? "arrowUp" : "arrowDown", text: `${trade.direction === "LONG" ? "BUY" : "SELL"} ${trade.quantity} @ ${trade.avgEntry}` });
     if (meta && candles.length > meta.exitIndex)
-      markers.push({ time: candles[meta.exitIndex].time as Time, position: trade.direction === "LONG" ? "aboveBar" : "belowBar", color: "#d6b77d", shape: trade.direction === "LONG" ? "arrowDown" : "arrowUp", text: `EXIT @ ${trade.avgExit}` });
+      markers.push({ time: T(candles[meta.exitIndex].time), position: trade.direction === "LONG" ? "aboveBar" : "belowBar", color: "#d6b77d", shape: trade.direction === "LONG" ? "arrowDown" : "arrowUp", text: `EXIT @ ${trade.avgExit}` });
     s.setMarkers(markers);
     chart.current?.timeScale().scrollToRealTime();
   }, [candles, meta, trade]);

@@ -51,8 +51,9 @@ export function checkGrounding(text: string, allowed: Set<string>): GroundingRes
     const isPct = m[2] === "%";
     if (!isMoney && !isPct && n <= 10 && Number.isInteger(n)) continue; // "3 trades", "2 losses"
     if (/^(19|20)\d{2}$/.test(raw) && !isMoney && !isPct) continue; // years
-    const candidates = [raw, n.toFixed(0), n.toFixed(1), n.toFixed(2)];
-    if (!candidates.some((c) => allowed.has(c))) ungrounded.push(m[0].trim());
+    // Compare at the precision the text uses: "2.3" must equal some payload value rounded to 1 dp.
+    const decimals = raw.includes(".") ? raw.split(".")[1].length : 0;
+    if (!allowed.has(n.toFixed(Math.min(decimals, 2))) && !allowed.has(raw)) ungrounded.push(m[0].trim());
   }
   const forbidden = FORBIDDEN.filter((r) => r.test(text)).map((r) => r.source);
   return { ok: ungrounded.length === 0 && forbidden.length === 0, ungrounded, forbidden };

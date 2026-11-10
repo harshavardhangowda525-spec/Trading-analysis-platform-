@@ -19,7 +19,9 @@ export function Coach({ llm }: { llm: boolean }) {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), [msgs, busy]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [msgs, busy]);
 
   const ask = async (question: string) => {
     if (!question.trim() || busy) return;
@@ -39,7 +41,7 @@ export function Coach({ llm }: { llm: boolean }) {
   };
 
   return (
-    <div className="flex h-full min-h-[520px] flex-col">
+    <div className="flex min-h-[520px] flex-1 flex-col lg:min-h-0">
       <div className="flex-1 space-y-3 overflow-y-auto px-4 pb-4 pt-2 sm:px-5" aria-live="polite">
         {msgs.length === 0 && (
           <div className="py-6 text-center">

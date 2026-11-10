@@ -331,7 +331,8 @@ export function Sparkline({ values, height = 36 }: { values: number[]; height?: 
   );
 }
 
-export function CategoryBars({ data, height = 220, valueKey, format }: { data: Record<string, any>[]; height?: number; valueKey: string; format: (v: number) => string }) {
+export function CategoryBars({ data, height = 220, valueKey, unit = "pct" }: { data: Record<string, any>[]; height?: number; valueKey: string; unit?: "pct" | "inr" | "num" }) {
+  const format = (v: number) => (unit === "pct" ? `${Math.round(v)}%` : unit === "inr" ? inr(v, { compact: true, decimals: 0 }) : String(v));
   return (
     <ChartFrame height={height}>
       <ResponsiveContainer>
@@ -339,7 +340,7 @@ export function CategoryBars({ data, height = 220, valueKey, format }: { data: R
           <CartesianGrid stroke={VIZ.grid} vertical={false} />
           <XAxis dataKey="label" {...axisProps} />
           <YAxis {...axisProps} width={44} tickFormatter={(v) => format(v)} />
-          <Tooltip cursor={{ fill: "rgba(255,255,255,0.04)" }} content={<Tip render={(p: any) => (<><p className="mb-1 font-semibold">{p.label}</p>{tipRow(valueKey, format(p[valueKey]))}{p.trades != null && tipRow("Trades", p.trades)}</>)} />} />
+          <Tooltip cursor={{ fill: "rgba(255,255,255,0.04)" }} content={<Tip render={(p: any) => (<><p className="mb-1 font-semibold">{p.full ?? p.label}</p>{tipRow(valueKey === "winRate" ? "Win rate" : valueKey, format(p[valueKey]))}{p.trades != null && tipRow("Trades", p.trades)}</>)} />} />
           <Bar dataKey={valueKey} radius={[4, 4, 0, 0]} fill={VIZ.cat[0]} maxBarSize={40} />
         </BarChart>
       </ResponsiveContainer>

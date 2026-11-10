@@ -61,7 +61,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         </div>
       ) : tab === "strategy" ? (
         <div className="grid gap-4 lg:grid-cols-2">
-          <Panel><PanelHeader title="Win rate by strategy" subtitle="Breakevens excluded" /><div className="px-3 pb-4"><CategoryBars data={b.strategy.map((s) => ({ label: s.label.split(" ").map((w) => w[0]).join(""), full: s.label, winRate: s.winRate ?? 0, trades: s.trades }))} valueKey="winRate" format={(v) => `${Math.round(v)}%`} /></div></Panel>
+          <Panel><PanelHeader title="Win rate by strategy" subtitle="Breakevens excluded" /><div className="px-3 pb-4"><CategoryBars data={b.strategy.map((s) => ({ label: s.label.split(" ").map((w) => w[0]).join(""), full: s.label, winRate: s.winRate ?? 0, trades: s.trades }))} valueKey="winRate" unit="pct" /></div></Panel>
           <Panel><PanelHeader title="Net P&L by strategy" /><div className="px-3 pb-4"><HorizontalPnl data={b.strategy.map((s) => ({ label: s.label, netPnl: s.netPnl, trades: s.trades }))} /></div></Panel>
           <Panel className="lg:col-span-2">
             <PanelHeader title="Strategy consistency" subtitle="Consistency = share of calendar weeks with positive net P&L for that strategy" />
