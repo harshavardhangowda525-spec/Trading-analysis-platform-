@@ -15,9 +15,9 @@ export const metadata = { title: "Trade" };
 
 const COST_LABEL: Record<string, string> = { brokerage: "Brokerage", stt: "STT", exchange_txn: "Exchange txn", sebi: "SEBI fee", gst: "GST", stamp_duty: "Stamp duty", dp: "DP charges", other: "Other" };
 
-export default async function TradePage({ params }: { params: Promise<{ key: string }> }) {
-  const { key } = await params;
-  const tradeKey = decodeURIComponent(key);
+// Uses ?key= instead of a [key] segment: bracketed chunk paths fail behind some CDNs.
+export default async function TradePage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
+  const tradeKey = (await searchParams).key ?? "";
   const ws = await getWorkspace();
   const t = findTrade(ws, tradeKey);
   if (!t) notFound();

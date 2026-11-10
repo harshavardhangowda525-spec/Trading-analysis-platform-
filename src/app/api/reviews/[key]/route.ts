@@ -70,7 +70,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ key: str
       .single();
     if (!row || row.status !== "complete")
       await sb.from("notifications").upsert(
-        { user_id: ws.userId, type: "ai_review_ready", title: `AI review ready: ${t.tradingsymbol}`, body: review.narrative.slice(0, 140), data: { href: `/journal/${encodeURIComponent(key)}` }, dedupe_key: `review:${key}` },
+        { user_id: ws.userId, type: "ai_review_ready", title: `AI review ready: ${t.tradingsymbol}`, body: review.narrative.slice(0, 140), data: { href: `/journal/trade?key=${encodeURIComponent(key)}` }, dedupe_key: `review:${key}` },
         { onConflict: "user_id,dedupe_key", ignoreDuplicates: true }
       );
     return json({ ...review, reviewId: saved?.id ?? null, feedback });

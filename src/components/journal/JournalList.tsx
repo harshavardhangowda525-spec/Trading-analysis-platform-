@@ -81,7 +81,7 @@ export function JournalList({ trades, strategies, tz, initialFilter }: { trades:
             {list.slice(0, 400).map((t) => (
               <tr key={t.tradeKey} className="border-b border-line/50 hover:bg-white/[0.025]">
                 <td className="px-3 py-2.5">
-                  <Link href={`/journal/${encodeURIComponent(t.tradeKey)}`} className="font-semibold hover:text-brass">{t.tradingsymbol}</Link>
+                  <Link href={`/journal/trade?key=${encodeURIComponent(t.tradeKey)}`} className="font-semibold hover:text-brass">{t.tradingsymbol}</Link>
                   <span className="ml-1.5 text-[10.5px] text-text-3">{t.exchange}·{t.product}</span>
                 </td>
                 <td className="px-3"><Badge tone={t.direction === "LONG" ? "signal" : "brass"}>{t.direction}</Badge></td>
@@ -134,7 +134,7 @@ export function JournalList({ trades, strategies, tz, initialFilter }: { trades:
                       <KV k="Strategy" v={t.strategy ?? "—"} />
                     </div>
                     <div className="px-4 pb-4">
-                      <Link href={`/journal/${encodeURIComponent(t.tradeKey)}`} className={cn(buttonClass("subtle", "md"), "w-full")}>Open trade & journal</Link>
+                      <Link href={`/journal/trade?key=${encodeURIComponent(t.tradeKey)}`} className={cn(buttonClass("subtle", "md"), "w-full")}>Open trade & journal</Link>
                     </div>
                   </motion.div>
                 )}

@@ -43,7 +43,7 @@ with a deterministic engine, and reviews trades with evidence-based AI.
 ```
 src/
   app/
-    (app)/            overview, journal, journal/[key], analytics, replay, intelligence,
+    (app)/            overview, journal, journal/trade (?key=), analytics, replay, intelligence,
                       risk, reports, broker, data-quality, settings
     api/              broker/zerodha/{login,callback,sync,disconnect,postback}, cron/sync,
                       import/csv, journal(+attachments), reviews/[key], coach, market/candles,

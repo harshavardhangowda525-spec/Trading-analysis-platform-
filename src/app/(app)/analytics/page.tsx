@@ -131,7 +131,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {x.evidence.slice(0, 8).map((k) => {
                       const t = trades.find((tt) => tt.tradeKey === k);
-                      return t ? <Link key={k} href={`/journal/${encodeURIComponent(k)}`} className="num rounded-lg border border-line px-2 py-1 text-[11px] text-text-2 hover:text-text">{t.tradingsymbol} {inr(t.netPnl, { sign: true, compact: true })}</Link> : null;
+                      return t ? <Link key={k} href={`/journal/trade?key=${encodeURIComponent(k)}`} className="num rounded-lg border border-line px-2 py-1 text-[11px] text-text-2 hover:text-text">{t.tradingsymbol} {inr(t.netPnl, { sign: true, compact: true })}</Link> : null;
                     })}
                     {x.evidence.length > 8 && <span className="px-1 py-1 text-[11px] text-text-3">+{x.evidence.length - 8} more</span>}
                   </div>

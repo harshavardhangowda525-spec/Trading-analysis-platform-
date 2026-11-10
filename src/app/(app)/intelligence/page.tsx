@@ -36,7 +36,7 @@ export default async function IntelligencePage({ searchParams }: { searchParams:
                 const r = buildReview(t, ws.journal.get(t.tradeKey) ?? null, ws.trades, null, "none", ws.risk.maxTradesPerDay);
                 return (
                   <li key={t.tradeKey}>
-                    <Link href={`/journal/${encodeURIComponent(t.tradeKey)}`} className="block rounded-xl border border-line bg-white/[0.02] p-3 hover:border-line-2">
+                    <Link href={`/journal/trade?key=${encodeURIComponent(t.tradeKey)}`} className="block rounded-xl border border-line bg-white/[0.02] p-3 hover:border-line-2">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-[13px] font-semibold">{t.tradingsymbol} <span className="num text-[11px] font-normal text-text-3">{fmtDateTime(t.exitAt, ws.tz)}</span></span>
                         <Pnl value={t.netPnl} size="sm" />

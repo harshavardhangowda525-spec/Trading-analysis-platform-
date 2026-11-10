@@ -31,7 +31,7 @@ export function OutcomeBadge({ outcome }: { outcome: TradeLite["outcome"] }) {
 
 export function TradeRow({ t, tz = "Asia/Kolkata" }: { t: TradeLite; tz?: string }) {
   return (
-    <Link href={`/journal/${encodeURIComponent(t.tradeKey)}`} className="group flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-white/[0.035]">
+    <Link href={`/journal/trade?key=${encodeURIComponent(t.tradeKey)}`} className="group flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-white/[0.035]">
       <div className={cn("grid size-9 shrink-0 place-items-center rounded-xl border text-[10px] font-bold", t.direction === "LONG" ? "border-signal/20 bg-signal/10 text-signal" : "border-brass/25 bg-brass/10 text-brass")} aria-label={t.direction}>
         {t.direction === "LONG" ? "L" : "S"}
       </div>

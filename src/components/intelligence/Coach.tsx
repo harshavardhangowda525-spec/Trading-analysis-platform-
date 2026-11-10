@@ -68,7 +68,7 @@ export function Coach({ llm }: { llm: boolean }) {
                     <details>
                       <summary className="cursor-pointer">Source trades ({m.meta.tradeIds.length})</summary>
                       <div className="mt-1 flex max-h-28 flex-wrap gap-1 overflow-y-auto">
-                        {m.meta.tradeIds.slice(0, 60).map((id) => <Link key={id} href={`/journal/${encodeURIComponent(id)}`} className="num rounded border border-line px-1.5 py-0.5 hover:text-text">{id.split(":")[1]}·{id.split(":").pop()?.slice(-6)}</Link>)}
+                        {m.meta.tradeIds.slice(0, 60).map((id) => <Link key={id} href={`/journal/trade?key=${encodeURIComponent(id)}`} className="num rounded border border-line px-1.5 py-0.5 hover:text-text">{id.split(":")[1]}·{id.split(":").pop()?.slice(-6)}</Link>)}
                       </div>
                     </details>
                   )}

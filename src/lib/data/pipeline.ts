@@ -143,7 +143,7 @@ export async function rebuildAnalytics(sb: SupabaseClient, userId: string): Prom
     type: "trade_closed",
     title: `Trade closed: ${t.tradingsymbol}`,
     body: `Gross P&L: ${t.grossPnl < 0 ? "−" : ""}₹${Math.abs(t.grossPnl).toFixed(2)}. AI review queued.`,
-    data: { href: `/journal/${encodeURIComponent(t.tradeKey)}`, trade_key: t.tradeKey },
+    data: { href: `/journal/trade?key=${encodeURIComponent(t.tradeKey)}`, trade_key: t.tradeKey },
     dedupe_key: `trade_closed:${t.tradeKey}`,
   }));
   if (fresh.length) {

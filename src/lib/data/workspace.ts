@@ -83,7 +83,7 @@ function buildDemo(): Workspace {
     body: `Gross P&L: ${t.grossPnl < 0 ? "−" : ""}₹${Math.abs(t.grossPnl).toFixed(2)}. AI review available.`,
     createdAt: t.exitAt,
     readAt: null,
-    href: `/journal/${encodeURIComponent(t.tradeKey)}`,
+    href: `/journal/trade?key=${encodeURIComponent(t.tradeKey)}`,
   }));
   notifications.push({ id: "n-demo", type: "weekly_report_ready", title: "Weekly report ready", body: "Your calendar-week report has been prepared.", createdAt: new Date().toISOString(), readAt: null, href: "/reports" });
   const ws: Workspace = {
