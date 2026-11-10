@@ -138,6 +138,16 @@ E2E smoke test (with the app running; needs `npm i -D playwright && npx playwrig
 BASE_URL=http://localhost:3000 npm run e2e
 ```
 
+## Deploy (Render) — current deployment
+
+Live service: **https://tradeos-4ie7.onrender.com** (Render web service `tradeos`, Singapore, free plan, auto-deploys from `claude/tradeos-trading-platform-ug65tp`).
+
+- Build: `npm ci --include=dev && npm run build` · Start: `npx next start -H 0.0.0.0 -p $PORT`
+- Set on Render: `NODE_VERSION`, `NEXT_PUBLIC_APP_URL`, Supabase URL + publishable key, `TOKEN_ENCRYPTION_KEY`, `CRON_SECRET`, `GROQ_MODEL`
+- Add in the Render dashboard (Environment): `SUPABASE_SERVICE_ROLE_KEY`, `KITE_API_KEY`, `KITE_API_SECRET`, `GROQ_API_KEY`, optional `RESEND_API_KEY` / `REPORT_FROM_EMAIL`. `NEXT_PUBLIC_*` changes need a rebuild.
+- Daily collection: `.github/workflows/daily-sync.yml` calls `/api/cron/sync` (needs repo secret `TRADEOS_CRON_SECRET` + variable `TRADEOS_URL`; scheduled workflows only run from the default branch). A Render Cron Job running `curl` is a paid alternative.
+- Free instances sleep after ~15 min idle; the first request after that takes up to a minute.
+
 ## Deploy (Vercel)
 
 1. Import the repo in Vercel and add all env vars (Production + Preview). Set `NEXT_PUBLIC_APP_URL` to the production URL.

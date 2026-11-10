@@ -1,0 +1,25 @@
+# Daily Zerodha collection after market close (16:45 IST, Mon–Fri).
+# Kite's /trades endpoint only covers the current day, so this run is what preserves history.
+# Setup (repo → Settings → Secrets and variables → Actions):
+#   secret   TRADEOS_CRON_SECRET = the CRON_SECRET set on the Render service
+#   variable TRADEOS_URL         = https://tradeos-4ie7.onrender.com
+# Note: GitHub only runs scheduled workflows from the default branch.
+name: Daily broker sync
+on:
+  schedule:
+    - cron: "15 11 * * 1-5"
+  workflow_dispatch: {}
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call TRADEOS scheduled sync
+        env:
+          URL: ${{ vars.TRADEOS_URL }}
+          SECRET: ${{ secrets.TRADEOS_CRON_SECRET }}
+        run: |
+          test -n "$URL" && test -n "$SECRET" || { echo "TRADEOS_URL / TRADEOS_CRON_SECRET not configured"; exit 1; }
+          # free Render instances sleep; retries cover the cold start
+          curl -fsS --retry 4 --retry-delay 20 --retry-all-errors --max-time 300 \
+            -H "Authorization: Bearer $SECRET" "$URL/api/cron/sync"
