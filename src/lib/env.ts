@@ -1,15 +1,11 @@
 /** Central, typed access to configuration. Secrets are only read server-side. */
 export const env = {
-  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-  supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
   appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
 };
 
-export const isSupabaseConfigured = () => Boolean(env.supabaseUrl && env.supabaseAnonKey);
-
 export function serverEnv() {
   return {
-    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+    databaseUrl: process.env.DATABASE_URL ?? "",
     kiteApiKey: process.env.KITE_API_KEY ?? "",
     kiteApiSecret: process.env.KITE_API_SECRET ?? "",
     tokenEncryptionKey: process.env.TOKEN_ENCRYPTION_KEY ?? "",
@@ -24,9 +20,9 @@ export function serverEnv() {
 export function integrationStatus() {
   const s = serverEnv();
   return {
-    supabase: isSupabaseConfigured(),
-    serviceRole: Boolean(s.serviceRoleKey),
-    kite: Boolean(s.kiteApiKey && s.kiteApiSecret && s.tokenEncryptionKey),
+    database: Boolean(s.databaseUrl),
+    encryption: Boolean(s.tokenEncryptionKey),
+    kite: Boolean(s.kiteApiKey && s.kiteApiSecret && s.tokenEncryptionKey && s.databaseUrl),
     groq: Boolean(s.groqApiKey),
     email: Boolean(s.resendApiKey && s.reportFromEmail),
     cron: Boolean(s.cronSecret),

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { FlaskConical } from "lucide-react";
 import { getWorkspace } from "@/lib/data/workspace";
-import { isSupabaseConfigured } from "@/lib/env";
+import { isDbConfigured } from "@/lib/db";
 import { BottomDock, Sidebar } from "@/components/shell/Navigation";
 import { TopBar } from "@/components/shell/TopBar";
 
@@ -15,6 +15,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     ws = await getWorkspace();
   } catch (e) {
     if ((e as Error).message === "UNAUTHENTICATED") redirect("/login");
+    if ((e as Error).message === "MFA_REQUIRED") redirect("/login/mfa");
     throw e;
   }
   return (
@@ -35,12 +36,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <div className="border-b border-warn/20 bg-warn/[0.07] px-4 py-2 text-[12px] text-warn sm:px-6">
             <FlaskConical className="mr-1.5 inline size-3.5 -translate-y-px" aria-hidden />
             <strong>Demo mode — synthetic data.</strong> All trades shown are generated samples, isolated from real records.{" "}
-            {isSupabaseConfigured() ? (
+            {isDbConfigured() ? (
               <Link href={ws.userId ? "/settings" : "/login"} className="underline underline-offset-2">
                 {ws.userId ? "Switch to live data" : "Sign in to use your real account"}
               </Link>
             ) : (
-              <span>Configure Supabase to enable sign-in and live data.</span>
+              <span>Configure DATABASE_URL to enable sign-in and live data.</span>
             )}
           </div>
         )}

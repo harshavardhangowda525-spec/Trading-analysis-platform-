@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { fail, json, requireUser } from "@/lib/api";
+import { db } from "@/lib/db";
 
 const money = z.number().finite().nonnegative().max(1e9).nullable();
 const text = (n: number) => z.string().max(n).nullable();
@@ -22,38 +23,26 @@ const Entry = z.object({
 export async function POST(req: Request) {
   const a = await requireUser();
   if ("res" in a) return a.res;
+  const uid = a.user.userId;
   const parsed = Entry.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return fail(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
   const e = parsed.data;
-  // trade must belong to the user (RLS restricts the select to own rows)
-  const { data: trade } = await a.sb.from("closed_trades").select("id").eq("trade_key", e.tradeKey).limit(1).maybeSingle();
+  const q = db();
+  const [trade] = await q`select id from closed_trades where user_id = ${uid} and trade_key = ${e.tradeKey} limit 1`;
   if (!trade) return fail("Trade not found", 404);
   let strategyId: string | null = null;
   if (e.strategy) {
-    const { data: s, error } = await a.sb.from("trade_strategies").upsert({ user_id: a.user.id, name: e.strategy }, { onConflict: "user_id,name" }).select("id").single();
-    if (error) return fail(error.message, 500);
+    const [s] = await q`insert into trade_strategies (user_id, name) values (${uid}, ${e.strategy})
+                        on conflict (user_id, name) do update set name = excluded.name returning id`;
     strategyId = s.id;
   }
-  const { error } = await a.sb.from("journal_entries").upsert(
-    {
-      user_id: a.user.id,
-      trade_key: e.tradeKey,
-      strategy_id: strategyId,
-      entry_rationale: e.entryRationale,
-      exit_rationale: e.exitRationale,
-      planned_stop: e.plannedStop,
-      planned_target: e.plannedTarget,
-      followed_plan: e.followedPlan,
-      mistakes: e.mistakes,
-      lessons: e.lessons,
-      emotional_state: e.emotionalState,
-      confidence: e.confidence,
-      tags: e.tags,
-      notes: e.notes,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id,trade_key" }
-  );
-  if (error) return fail(error.message, 500);
+  await q`insert into journal_entries (user_id, trade_key, strategy_id, entry_rationale, exit_rationale, planned_stop, planned_target, followed_plan,
+            mistakes, lessons, emotional_state, confidence, tags, notes, updated_at)
+          values (${uid}, ${e.tradeKey}, ${strategyId}, ${e.entryRationale}, ${e.exitRationale}, ${e.plannedStop}, ${e.plannedTarget}, ${e.followedPlan},
+            ${e.mistakes}::text[], ${e.lessons}, ${e.emotionalState}, ${e.confidence}, ${e.tags}::text[], ${e.notes}, now())
+          on conflict (user_id, trade_key) do update set strategy_id = excluded.strategy_id, entry_rationale = excluded.entry_rationale,
+            exit_rationale = excluded.exit_rationale, planned_stop = excluded.planned_stop, planned_target = excluded.planned_target,
+            followed_plan = excluded.followed_plan, mistakes = excluded.mistakes, lessons = excluded.lessons, emotional_state = excluded.emotional_state,
+            confidence = excluded.confidence, tags = excluded.tags, notes = excluded.notes, updated_at = now()`;
   return json({ ok: true });
 }

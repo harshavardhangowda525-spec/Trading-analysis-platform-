@@ -89,7 +89,7 @@ export function rowToJournal(r: any): JournalEntry {
     confidence: r.confidence,
     tags: r.tags ?? [],
     notes: r.notes,
-    updatedAt: r.updated_at,
+    updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
   };
 }
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { fail, json, requireUser } from "@/lib/api";
+import { db } from "@/lib/db";
 
 const Body = z.union([z.object({ all: z.literal(true) }), z.object({ ids: z.array(z.string().uuid()).min(1).max(100) })]);
 
@@ -8,9 +9,7 @@ export async function POST(req: Request) {
   if ("res" in a) return a.res;
   const b = Body.safeParse(await req.json().catch(() => null));
   if (!b.success) return fail("Invalid body");
-  let q = a.sb.from("notifications").update({ read_at: new Date().toISOString() }).is("read_at", null);
-  if ("ids" in b.data) q = q.in("id", b.data.ids);
-  const { error } = await q;
-  if (error) return fail(error.message, 500);
+  if ("ids" in b.data) await db()`update notifications set read_at = now() where user_id = ${a.user.userId} and read_at is null and id = any(${b.data.ids}::uuid[])`;
+  else await db()`update notifications set read_at = now() where user_id = ${a.user.userId} and read_at is null`;
   return json({ ok: true });
 }

@@ -1,9 +1,9 @@
-import { clientIp, fail, json, requireUser } from "@/lib/api";
+import { clientIp, json, requireUser } from "@/lib/api";
 import { serverEnv } from "@/lib/env";
+import { db } from "@/lib/db";
 import { audit } from "@/lib/data/pipeline";
 import { KiteClient } from "@/lib/kite/client";
 import { decryptSecret } from "@/lib/security/crypto";
-import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -11,11 +11,11 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const a = await requireUser();
   if ("res" in a) return a.res;
-  if (!serverEnv().serviceRoleKey) return fail("Server not configured", 501);
-  const admin = createAdminClient();
-  const { data: conn } = await admin.from("broker_connections").select("id").eq("user_id", a.user.id).eq("broker", "zerodha").maybeSingle();
+  const uid = a.user.userId;
+  const q = db();
+  const [conn] = await q`select id from broker_connections where user_id = ${uid} and broker = 'zerodha'`;
   if (!conn) return json({ ok: true });
-  const { data: secret } = await admin.from("broker_secrets").select("access_token_enc").eq("connection_id", conn.id).maybeSingle();
+  const [secret] = await q`select access_token_enc from broker_secrets where connection_id = ${conn.id} and user_id = ${uid}`;
   if (secret) {
     try {
       await new KiteClient(serverEnv().kiteApiKey, decryptSecret(secret.access_token_enc)).invalidateSession();
@@ -23,8 +23,10 @@ export async function POST(req: Request) {
       /* token may already be expired — still delete locally */
     }
   }
-  await admin.from("broker_secrets").delete().eq("connection_id", conn.id);
-  await admin.from("broker_connections").update({ status: "disconnected", disconnected_at: new Date().toISOString(), token_expires_at: null, updated_at: new Date().toISOString() }).eq("id", conn.id);
-  await audit(a.user.id, "broker.disconnected", {}, "broker_connections", conn.id, clientIp(req));
+  await q.transaction([
+    q`delete from broker_secrets where connection_id = ${conn.id} and user_id = ${uid}`,
+    q`update broker_connections set status = 'disconnected', disconnected_at = now(), token_expires_at = null, updated_at = now() where id = ${conn.id} and user_id = ${uid}`,
+  ]);
+  await audit(uid, "broker.disconnected", {}, "broker_connections", conn.id, clientIp(req));
   return json({ ok: true });
 }

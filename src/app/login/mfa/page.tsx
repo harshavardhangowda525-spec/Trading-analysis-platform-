@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, ShieldCheck } from "lucide-react";
-import { createClient } from "@/lib/supabase/browser";
 import { Button, Input } from "@/components/ui/primitives";
 
 export default function MfaPage() {
@@ -14,16 +13,9 @@ export default function MfaPage() {
     e.preventDefault();
     setBusy(true);
     setErr(null);
-    const sb = createClient();
-    const { data } = await sb.auth.mfa.listFactors();
-    const f = data?.totp.find((x) => x.status === "verified");
-    if (!f) {
-      setBusy(false);
-      return setErr("No authenticator is enrolled on this account.");
-    }
-    const { error } = await sb.auth.mfa.challengeAndVerify({ factorId: f.id, code });
+    const res = await fetch("/api/auth/mfa", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "verify", code }) });
     setBusy(false);
-    if (error) return setErr(error.message);
+    if (!res.ok) return setErr((await res.json().catch(() => ({}))).error ?? "Verification failed");
     router.push("/");
     router.refresh();
   };

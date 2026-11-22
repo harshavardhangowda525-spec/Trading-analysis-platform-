@@ -4,7 +4,7 @@ import { serverEnv } from "@/lib/env";
 import { postbackChecksum } from "@/lib/kite/client";
 import { syncUser } from "@/lib/kite/sync";
 import { safeEqual } from "@/lib/security/crypto";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request) {
   const env = serverEnv();
-  if (!env.kiteApiSecret || !env.serviceRoleKey) return fail("Not configured", 501);
+  if (!env.kiteApiSecret || !env.databaseUrl) return fail("Not configured", 501);
   const raw = await req.text();
   if (raw.length > 64_000) return fail("Payload too large", 413);
   let p: { order_id?: string; order_timestamp?: string; checksum?: string; user_id?: string; status?: string; tradingsymbol?: string; exchange?: string };
@@ -27,15 +27,15 @@ export async function POST(req: Request) {
   if (!p.order_id || !p.order_timestamp || !p.checksum || !p.user_id) return fail("Missing fields");
   if (!safeEqual(postbackChecksum(p.order_id, p.order_timestamp, env.kiteApiSecret), p.checksum)) return fail("Bad checksum", 401);
 
-  const admin = createAdminClient();
-  const { data: conn } = await admin.from("broker_connections").select("user_id, status").eq("broker", "zerodha").eq("broker_user_id", p.user_id).maybeSingle();
+  const q = db();
+  const [conn] = await q`select user_id, status from broker_connections where broker = 'zerodha' and broker_user_id = ${p.user_id}`;
   if (!conn) return json({ ok: true }); // unknown account — acknowledge without action
-  await admin.from("raw_orders").upsert(
-    { user_id: conn.user_id, broker_order_id: p.order_id, status: p.status ?? null, tradingsymbol: p.tradingsymbol ?? null, exchange: p.exchange ?? null, payload: { ...p, checksum: undefined }, received_at: new Date().toISOString() },
-    { onConflict: "user_id,broker_order_id" }
-  );
+  const payload = { ...p, checksum: undefined };
+  await q`insert into raw_orders (user_id, broker_order_id, status, tradingsymbol, exchange, payload)
+          values (${conn.user_id}, ${p.order_id}, ${p.status ?? null}, ${p.tradingsymbol ?? null}, ${p.exchange ?? null}, ${JSON.stringify(payload)}::jsonb)
+          on conflict (user_id, broker_order_id) do update set status = excluded.status, payload = excluded.payload, received_at = now()`;
   if (p.status === "COMPLETE" && ["connected", "updated", "partial"].includes(conn.status)) {
-    after(() => syncUser(admin, conn.user_id, "postback").catch(() => undefined));
+    after(() => syncUser(conn.user_id, "postback").catch(() => undefined));
   }
   return json({ ok: true });
 }

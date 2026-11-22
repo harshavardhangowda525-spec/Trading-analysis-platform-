@@ -5,8 +5,8 @@ import { generateDemoExecutions, demoJournalFor } from "@/lib/demo/generate";
 import { reconstruct } from "@/lib/engine/reconstruct";
 import { localDate } from "@/lib/engine/time";
 import { CALC_VERSION, DEFAULT_RISK, type ClosedTrade, type CostLine, type JournalEntry, type OpenPosition, type RiskSettings } from "@/lib/engine/types";
-import { isSupabaseConfigured } from "@/lib/env";
-import { createClient } from "@/lib/supabase/server";
+import { db, iso, isDbConfigured } from "@/lib/db";
+import { getSession, isFullyAuthenticated } from "@/lib/auth/session";
 import { rowToJournal, rowToPosition, rowToRisk, rowToTrade } from "./mappers";
 
 export type ConnectionStatus = "connected" | "synchronizing" | "updated" | "reconnect_required" | "partial" | "sync_failed" | "disconnected";
@@ -120,108 +120,89 @@ function buildDemo(): Workspace {
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 async function buildLive(userId: string, email: string | null): Promise<Workspace> {
-  const sb = await createClient();
-  const [tradesQ, costsQ, journalQ, posQ, riskQ, prefsQ, connQ, notifQ, stratQ, batchQ, syncQ, execCountQ] = await Promise.all([
-    sb.from("closed_trades").select("*").eq("calc_version", CALC_VERSION).eq("is_demo", false).order("exit_at", { ascending: true }).limit(20000),
-    sb.from("trade_costs").select("closed_trade_id, component, amount, source").limit(100000),
-    sb.from("journal_entries").select("*, trade_strategies(name)").limit(20000),
-    sb.from("reconstructed_positions").select("*").eq("calc_version", CALC_VERSION),
-    sb.from("risk_settings").select("*").maybeSingle(),
-    sb.from("user_preferences").select("*").maybeSingle(),
-    sb.from("broker_connections").select("*").eq("broker", "zerodha").maybeSingle(),
-    sb.from("notifications").select("*").order("created_at", { ascending: false }).limit(30),
-    sb.from("trade_strategies").select("name").order("name"),
-    sb.from("broker_import_batches").select("*").order("created_at", { ascending: false }).limit(10),
-    sb.from("broker_sync_runs").select("*").order("started_at", { ascending: false }).limit(1).maybeSingle(),
-    sb.from("raw_executions").select("id", { count: "exact", head: true }).eq("is_demo", false),
+  const q = db();
+  const [tradesR, costsR, journalR, posR, riskR, prefsR, connR, notifR, stratR, batchR, syncR, execCountR] = await Promise.all([
+    q`select * from closed_trades where user_id = ${userId} and calc_version = ${CALC_VERSION} and is_demo = false order by exit_at asc limit 20000`,
+    q`select c.closed_trade_id, c.component, c.amount, c.source from trade_costs c where c.user_id = ${userId}`,
+    q`select j.*, s.name as strategy_name from journal_entries j left join trade_strategies s on s.id = j.strategy_id where j.user_id = ${userId}`,
+    q`select * from reconstructed_positions where user_id = ${userId} and calc_version = ${CALC_VERSION}`,
+    q`select * from risk_settings where user_id = ${userId}`,
+    q`select * from user_preferences where user_id = ${userId}`,
+    q`select * from broker_connections where user_id = ${userId} and broker = 'zerodha'`,
+    q`select * from notifications where user_id = ${userId} order by created_at desc limit 30`,
+    q`select name from trade_strategies where user_id = ${userId} order by name`,
+    q`select * from broker_import_batches where user_id = ${userId} order by created_at desc limit 10`,
+    q`select * from broker_sync_runs where user_id = ${userId} order by started_at desc limit 1`,
+    q`select count(*)::int as n from raw_executions where user_id = ${userId} and is_demo = false`,
   ]);
   const costsBy = new Map<string, CostLine[]>();
-  for (const c of costsQ.data ?? []) {
+  for (const c of costsR as any[]) {
     const arr = costsBy.get(c.closed_trade_id) ?? [];
     arr.push({ component: c.component, amount: Number(c.amount), source: c.source });
     costsBy.set(c.closed_trade_id, arr);
   }
-  const trades = (tradesQ.data ?? []).map((r: any) => rowToTrade(r, costsBy.get(r.id) ?? []));
-  const journal = new Map<string, JournalEntry>((journalQ.data ?? []).map((r: any) => [r.trade_key, rowToJournal(r)]));
-  const c: any = connQ.data;
+  const trades = (tradesR as any[]).map((r) => rowToTrade(r, costsBy.get(r.id) ?? []));
+  const journal = new Map<string, JournalEntry>((journalR as any[]).map((r) => [r.trade_key, rowToJournal({ ...r, trade_strategies: r.strategy_name ? { name: r.strategy_name } : null })]));
+  const c: any = connR[0];
+  const prefs: any = prefsR[0];
+  const execCount = (execCountR[0] as any)?.n ?? 0;
   const est = trades.filter((t) => t.costStatus === "estimated").length;
   const journalCoverage = trades.length ? Math.round((trades.filter((t) => journal.has(t.tradeKey)).length / trades.length) * 100) : 0;
   const warnings: string[] = [];
   if (est) warnings.push(`${est} trade(s) use estimated charges. Import contract notes to verify.`);
   if (c?.status === "reconnect_required") warnings.push("Zerodha session expired — reconnect to resume daily collection.");
-  const lastSync: any = syncQ.data;
+  const lastSync: any = syncR[0];
   if (lastSync?.status === "failed") warnings.push(`Last sync failed: ${lastSync.error ?? "unknown error"}`);
-  const status: DataQuality["status"] = !trades.length && !(execCountQ.count ?? 0) ? "empty" : warnings.length ? (est === trades.length ? "awaiting_verification" : "partial") : "complete";
+  const status: DataQuality["status"] = !trades.length && !execCount ? "empty" : warnings.length ? (est === trades.length ? "awaiting_verification" : "partial") : "complete";
 
   return {
     mode: "live",
     userId,
     email,
-    tz: (prefsQ.data as any)?.timezone ?? "Asia/Kolkata",
-    weekStart: (prefsQ.data as any)?.week_start ?? 1,
+    tz: prefs?.timezone ?? "Asia/Kolkata",
+    weekStart: prefs?.week_start ?? 1,
     trades,
-    openPositions: (posQ.data ?? []).map(rowToPosition),
+    openPositions: (posR as any[]).map((p) => rowToPosition({ ...p, opened_at: iso(p.opened_at) })),
     journal,
-    risk: rowToRisk(riskQ.data),
+    risk: rowToRisk(riskR[0] ?? null),
     connection: {
       status: (c?.status as ConnectionStatus) ?? "disconnected",
       brokerUserId: c?.broker_user_id ?? null,
       brokerUserName: c?.broker_user_name ?? null,
-      lastSyncedAt: c?.last_synced_at ?? null,
+      lastSyncedAt: iso(c?.last_synced_at),
       lastError: c?.last_error ?? null,
-      tokenExpiresAt: c?.token_expires_at ?? null,
+      tokenExpiresAt: iso(c?.token_expires_at),
     },
-    notifications: (notifQ.data ?? []).map((n: any) => ({
-      id: n.id,
-      type: n.type,
-      title: n.title,
-      body: n.body,
-      createdAt: n.created_at,
-      readAt: n.read_at,
-      href: n.data?.href,
-    })),
-    strategies: (stratQ.data ?? []).map((s: any) => s.name),
-    dashboardLayout: (prefsQ.data as any)?.dashboard_layout ?? [],
+    notifications: (notifR as any[]).map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, createdAt: iso(n.created_at)!, readAt: iso(n.read_at), href: n.data?.href })),
+    strategies: (stratR as any[]).map((x) => x.name),
+    dashboardLayout: prefs?.dashboard_layout ?? [],
     dataQuality: {
       status,
-      executions: execCountQ.count ?? 0,
+      executions: execCount,
       closedTrades: trades.length,
-      openPositions: posQ.data?.length ?? 0,
+      openPositions: posR.length,
       estimatedCostTrades: est,
       verifiedCostTrades: trades.length - est,
       journalCoverage,
       warnings,
-      batches: (batchQ.data ?? []).map((b: any) => ({
-        id: b.id,
-        source: b.source,
-        fileName: b.file_name,
-        createdAt: b.created_at,
-        inserted: b.inserted_count,
-        duplicates: b.duplicate_count,
-        errors: b.error_count,
-        status: b.status,
-      })),
-      lastSync: lastSync ? { status: lastSync.status, startedAt: lastSync.started_at, error: lastSync.error } : null,
+      batches: (batchR as any[]).map((b) => ({ id: b.id, source: b.source, fileName: b.file_name, createdAt: iso(b.created_at)!, inserted: b.inserted_count, duplicates: b.duplicate_count, errors: b.error_count, status: b.status })),
+      lastSync: lastSync ? { status: lastSync.status, startedAt: iso(lastSync.started_at)!, error: lastSync.error } : null,
     },
   };
 }
 
 /** Resolve the current user's workspace. Cached per request. */
 export const getWorkspace = cache(async (): Promise<Workspace> => {
-  if (!isSupabaseConfigured()) return buildDemo();
-  const store = await cookies();
-  const sb = await createClient();
-  const { data } = await sb.auth.getUser();
-  if (!data.user) {
-    if (store.get(DEMO_COOKIE)?.value === "1") return buildDemo();
+  if (!isDbConfigured()) return buildDemo();
+  const session = await getSession();
+  if (session && !isFullyAuthenticated(session)) throw new Error("MFA_REQUIRED");
+  if (!session) {
+    if ((await cookies()).get(DEMO_COOKIE)?.value === "1") return buildDemo();
     throw new Error("UNAUTHENTICATED");
   }
-  const { data: prefs } = await sb.from("user_preferences").select("data_mode").maybeSingle();
-  if ((prefs as any)?.data_mode === "demo") {
-    const demo = buildDemo();
-    return { ...demo, userId: data.user.id, email: data.user.email ?? null };
-  }
-  return buildLive(data.user.id, data.user.email ?? null);
+  const prefs = await db()`select data_mode from user_preferences where user_id = ${session.userId}`;
+  if ((prefs[0] as { data_mode?: string } | undefined)?.data_mode === "demo") return { ...buildDemo(), userId: session.userId, email: session.email };
+  return buildLive(session.userId, session.email);
 });
 
 export function findTrade(ws: Workspace, key: string) {

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, BrainCircuit, PlayCircle, Receipt } from "lucide-react";
 import { findTrade, getWorkspace } from "@/lib/data/workspace";
-import { createClient } from "@/lib/supabase/server";
+import { db } from "@/lib/db";
 import { plannedRisk } from "@/lib/engine/metrics";
 import type { TradeLeg } from "@/lib/engine/types";
 import { Badge, PageTitle, Panel, PanelHeader, Pnl, Pct, Provenance, buttonClass } from "@/components/ui/primitives";
@@ -25,25 +25,23 @@ export default async function TradePage({ searchParams }: { searchParams: Promis
 
   let legs: TradeLeg[] = t.legs;
   let attachments: { path: string; url: string | null }[] = [];
-  if (ws.mode === "live") {
-    const sb = await createClient();
+  if (ws.mode === "live" && ws.userId) {
+    const q = db();
     const ids = t.executionIds.map((x) => x.split(":").slice(1).join(":"));
-    const { data } = await sb.from("raw_executions").select("broker_trade_id, broker_order_id, side, quantity, price, executed_at").eq("exchange", t.exchange).in("broker_trade_id", ids).order("executed_at");
-    legs = (data ?? []).map((r) => ({
+    const rows = await q`select broker_trade_id, broker_order_id, side, quantity, price, executed_at from raw_executions
+                         where user_id = ${ws.userId} and exchange = ${t.exchange} and broker_trade_id = any(${ids}::text[]) order by executed_at`;
+    legs = rows.map((r) => ({
       executionId: `${t.exchange}:${r.broker_trade_id}`,
       brokerOrderId: r.broker_order_id,
       side: r.side,
       quantity: Number(r.quantity),
       price: Number(r.price),
-      executedAt: r.executed_at,
+      executedAt: new Date(r.executed_at).toISOString(),
       role: (r.side === "BUY") === (t.direction === "LONG") ? "entry" : "exit",
     }));
-    const { data: je } = await sb.from("journal_entries").select("id, journal_attachments(storage_path)").eq("trade_key", tradeKey).maybeSingle();
-    const paths = ((je?.journal_attachments as { storage_path: string }[] | undefined) ?? []).map((a) => a.storage_path);
-    if (paths.length) {
-      const { data: signed } = await sb.storage.from("journal-attachments").createSignedUrls(paths, 3600);
-      attachments = (signed ?? []).map((s) => ({ path: s.path ?? "", url: s.signedUrl }));
-    }
+    const att = await q`select a.id from journal_attachments a join journal_entries j on j.id = a.journal_entry_id
+                        where a.user_id = ${ws.userId} and j.trade_key = ${tradeKey} order by a.created_at`;
+    attachments = att.map((x) => ({ path: x.id, url: `/api/journal/attachments?id=${x.id}` }));
   }
   const risk = plannedRisk(t, j);
   const costs = t.verifiedCosts ?? t.estCosts;

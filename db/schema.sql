@@ -1,50 +1,49 @@
--- TRADEOS initial schema
--- Conventions:
---   * UUID primary keys, every user-owned row carries user_id -> auth.users
---   * Raw broker data (raw_orders, raw_executions) is stored separately from
---     normalized analytical records (closed_trades, reconstructed_positions ...)
---   * Analytical rows carry calc_version so metrics can be rebuilt when the
---     accounting methodology changes.
---   * Journal entries / AI reviews are keyed by a deterministic trade_key so they
---     survive a rebuild of closed_trades.
---   * Broker secrets live in broker_secrets which has RLS enabled and NO policies:
---     only the service role (server) can read or write it. Values are additionally
---     AES-256-GCM encrypted by the application before storage.
-
+-- TRADEOS schema for Neon Postgres.
+-- Access control is enforced in the application: every query is scoped by the
+-- authenticated user's id (see src/lib/db.ts and src/lib/auth). Raw broker data is
+-- kept separate from analytical records; analytics carry calc_version.
 create extension if not exists pgcrypto;
 
--- ---------------------------------------------------------------- users
 create table public.users (
-  id uuid primary key references auth.users(id) on delete cascade,
-  email text,
+  id uuid primary key default gen_random_uuid(),
+  email text not null,
+  password_hash text not null,
   display_name text,
+  totp_secret_enc text,
+  totp_enabled boolean not null default false,
+  failed_logins int not null default 0,
+  locked_until timestamptz,
   created_at timestamptz not null default now()
 );
+create unique index users_email_lower on public.users (lower(email));
+
+create table public.sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  token_hash text not null unique,
+  mfa_passed boolean not null default false,
+  expires_at timestamptz not null,
+  ip text,
+  user_agent text,
+  created_at timestamptz not null default now()
+);
+create index on public.sessions (user_id);
 
 create table public.user_preferences (
-  user_id uuid primary key references auth.users(id) on delete cascade,
+  user_id uuid primary key references public.users(id) on delete cascade,
   timezone text not null default 'Asia/Kolkata',
   currency text not null default 'INR',
-  week_start smallint not null default 1 check (week_start between 0 and 6), -- 1 = Monday
+  week_start smallint not null default 1 check (week_start between 0 and 6),
   dashboard_layout jsonb not null default '[]'::jsonb,
   email_reports boolean not null default false,
   data_mode text not null default 'live' check (data_mode in ('live','demo')),
   updated_at timestamptz not null default now()
 );
 
-create or replace function public.handle_new_user()
-returns trigger language plpgsql security definer set search_path = '' as $$
-begin
-  insert into public.users (id, email) values (new.id, new.email) on conflict do nothing;
-  insert into public.user_preferences (user_id) values (new.id) on conflict do nothing;
-  insert into public.risk_settings (user_id) values (new.id) on conflict do nothing;
-  return new;
-end $$;
-
 -- ---------------------------------------------------------------- broker
 create table public.broker_connections (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   broker text not null default 'zerodha' check (broker in ('zerodha')),
   broker_user_id text,
   broker_user_name text,
@@ -62,14 +61,14 @@ create table public.broker_connections (
 
 create table public.broker_secrets (
   connection_id uuid primary key references public.broker_connections(id) on delete cascade,
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   access_token_enc text not null,
   updated_at timestamptz not null default now()
 );
 
 create table public.broker_sync_runs (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   connection_id uuid references public.broker_connections(id) on delete set null,
   trigger text not null check (trigger in ('manual','scheduled','postback','connect')),
   status text not null default 'running' check (status in ('running','succeeded','partial','failed')),
@@ -82,7 +81,7 @@ create index on public.broker_sync_runs (user_id, started_at desc);
 
 create table public.broker_import_batches (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   source text not null check (source in ('kite_api','csv','demo')),
   file_name text,
   content_sha256 text,
@@ -98,7 +97,7 @@ create index on public.broker_import_batches (user_id, created_at desc);
 
 create table public.raw_orders (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   batch_id uuid references public.broker_import_batches(id) on delete set null,
   broker_order_id text not null,
   status text,
@@ -112,7 +111,7 @@ create table public.raw_orders (
 
 create table public.raw_executions (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   batch_id uuid references public.broker_import_batches(id) on delete set null,
   source text not null check (source in ('kite_api','csv','demo')),
   is_demo boolean not null default false,
@@ -154,7 +153,7 @@ create table public.instruments (
 -- ---------------------------------------------------------------- analytics
 create table public.trade_strategies (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   name text not null,
   description text,
   created_at timestamptz not null default now(),
@@ -163,7 +162,7 @@ create table public.trade_strategies (
 
 create table public.reconstructed_positions (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   calc_version text not null,
   exchange text not null,
   tradingsymbol text not null,
@@ -178,7 +177,7 @@ create table public.reconstructed_positions (
 
 create table public.position_lots (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   position_id uuid not null references public.reconstructed_positions(id) on delete cascade,
   execution_id uuid references public.raw_executions(id) on delete cascade,
   remaining_quantity numeric(20,4) not null,
@@ -189,7 +188,7 @@ create index on public.position_lots (position_id);
 
 create table public.closed_trades (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   calc_version text not null,
   trade_key text not null,
   is_demo boolean not null default false,
@@ -220,7 +219,7 @@ create index on public.closed_trades (user_id, tradingsymbol);
 
 create table public.trade_costs (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   closed_trade_id uuid not null references public.closed_trades(id) on delete cascade,
   component text not null check (component in ('brokerage','stt','exchange_txn','sebi','gst','stamp_duty','dp','other')),
   amount numeric(20,4) not null,
@@ -230,7 +229,7 @@ create index on public.trade_costs (closed_trade_id);
 
 create table public.journal_entries (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   trade_key text not null,
   strategy_id uuid references public.trade_strategies(id) on delete set null,
   entry_rationale text,
@@ -258,9 +257,9 @@ create index on public.journal_entries using gin (tags);
 
 create table public.journal_attachments (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   journal_entry_id uuid not null references public.journal_entries(id) on delete cascade,
-  storage_path text not null,
+  data bytea not null,
   mime_type text,
   caption text,
   created_at timestamptz not null default now()
@@ -268,7 +267,7 @@ create table public.journal_attachments (
 
 create table public.trading_plans (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   name text not null,
   rules jsonb not null default '[]'::jsonb,
   active boolean not null default true,
@@ -276,7 +275,7 @@ create table public.trading_plans (
 );
 
 create table public.risk_settings (
-  user_id uuid primary key references auth.users(id) on delete cascade,
+  user_id uuid primary key references public.users(id) on delete cascade,
   starting_capital numeric(20,2) not null default 100000,
   max_risk_per_trade_pct numeric(6,3) not null default 1,
   max_daily_loss numeric(20,2) not null default 2000,
@@ -289,7 +288,7 @@ create table public.risk_settings (
 
 create table public.performance_snapshots (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   calc_version text not null,
   period_type text not null check (period_type in ('day','week','month','all')),
   period_start date not null,
@@ -300,7 +299,7 @@ create table public.performance_snapshots (
 
 create table public.ai_trade_reviews (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   trade_key text not null,
   status text not null default 'pending' check (status in ('pending','complete','failed')),
   model text,
@@ -317,7 +316,7 @@ create table public.ai_trade_reviews (
 
 create table public.ai_review_feedback (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   review_id uuid not null references public.ai_trade_reviews(id) on delete cascade,
   item_key text not null,
   verdict text not null check (verdict in ('accept','reject','correct')),
@@ -328,7 +327,7 @@ create table public.ai_review_feedback (
 
 create table public.weekly_reports (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   week_start date not null,
   week_end date not null,
   timezone text not null,
@@ -341,7 +340,7 @@ create table public.weekly_reports (
 
 create table public.notifications (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
   type text not null check (type in ('trade_imported','trade_closed','daily_pnl','daily_loss_exceeded',
     'weekly_report_ready','broker_disconnected','sync_failed','missing_journal','ai_review_ready')),
   title text not null,
@@ -356,96 +355,27 @@ create index on public.notifications (user_id, created_at desc);
 
 create table public.audit_logs (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users(id) on delete set null,
+  user_id uuid references public.users(id) on delete set null,
   action text not null,
   entity text,
   entity_id text,
   metadata jsonb not null default '{}'::jsonb,
-  ip inet,
+  ip text,
   created_at timestamptz not null default now()
 );
 create index on public.audit_logs (user_id, created_at desc);
 
-create trigger on_auth_user_created after insert on auth.users
-  for each row execute function public.handle_new_user();
 
--- ---------------------------------------------------------------- RLS
-do $$
-declare t text;
-begin
-  foreach t in array array['user_preferences','broker_connections','broker_sync_runs','broker_import_batches',
-    'raw_orders','raw_executions','trade_strategies','reconstructed_positions','position_lots','closed_trades',
-    'trade_costs','journal_entries','journal_attachments','trading_plans','risk_settings','performance_snapshots',
-    'ai_trade_reviews','ai_review_feedback','weekly_reports','notifications']
-  loop
-    execute format('alter table public.%I enable row level security', t);
-    execute format('create policy "owner_select" on public.%I for select to authenticated using ((select auth.uid()) = user_id)', t);
-    execute format('create policy "owner_insert" on public.%I for insert to authenticated with check ((select auth.uid()) = user_id)', t);
-    execute format('create policy "owner_update" on public.%I for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id)', t);
-    execute format('create policy "owner_delete" on public.%I for delete to authenticated using ((select auth.uid()) = user_id)', t);
-  end loop;
-end $$;
-
--- broker_connections status is written by the server only; users may read their own row
-drop policy "owner_insert" on public.broker_connections;
-drop policy "owner_update" on public.broker_connections;
-drop policy "owner_delete" on public.broker_connections;
-
-alter table public.users enable row level security;
-create policy "self_select" on public.users for select to authenticated using ((select auth.uid()) = id);
-create policy "self_update" on public.users for update to authenticated using ((select auth.uid()) = id) with check ((select auth.uid()) = id);
-
--- secrets: RLS on, no policies => service role only
-alter table public.broker_secrets enable row level security;
-
--- audit logs: users may read their own, only the server writes
-alter table public.audit_logs enable row level security;
-create policy "owner_select" on public.audit_logs for select to authenticated using ((select auth.uid()) = user_id);
-
--- reference data: readable by any signed-in user, written by server only
-alter table public.instruments enable row level security;
-create policy "read_all" on public.instruments for select to authenticated using (true);
-
--- ---------------------------------------------------------------- atomic trade rebuild
--- Replaces the closed trades for one calc_version in a single transaction.
-create or replace function public.replace_closed_trades(p_calc_version text, p_trades jsonb, p_costs jsonb)
-returns int language plpgsql security invoker set search_path = '' as $$
-declare uid uuid := auth.uid(); n int;
-begin
-  if uid is null then raise exception 'not authenticated'; end if;
-  delete from public.closed_trades where user_id = uid and calc_version = p_calc_version;
-  insert into public.closed_trades (user_id, calc_version, trade_key, is_demo, exchange, tradingsymbol,
-    instrument_category, product, direction, quantity, avg_entry, avg_exit, entry_at, exit_at, gross_pnl,
-    est_costs, verified_costs, net_pnl, cost_status, return_pct, holding_seconds, outcome, execution_ids)
-  select uid, p_calc_version, t->>'trade_key', coalesce((t->>'is_demo')::boolean,false), t->>'exchange',
-    t->>'tradingsymbol', t->>'instrument_category', t->>'product', t->>'direction', (t->>'quantity')::numeric,
-    (t->>'avg_entry')::numeric, (t->>'avg_exit')::numeric, (t->>'entry_at')::timestamptz, (t->>'exit_at')::timestamptz,
-    (t->>'gross_pnl')::numeric, (t->>'est_costs')::numeric, (t->>'verified_costs')::numeric, (t->>'net_pnl')::numeric,
-    t->>'cost_status', (t->>'return_pct')::numeric, (t->>'holding_seconds')::bigint, t->>'outcome',
-    array(select jsonb_array_elements_text(t->'execution_ids'))
-  from jsonb_array_elements(p_trades) t;
-  get diagnostics n = row_count;
-  insert into public.trade_costs (user_id, closed_trade_id, component, amount, source)
-  select uid, ct.id, c->>'component', (c->>'amount')::numeric, c->>'source'
-  from jsonb_array_elements(p_costs) c
-  join public.closed_trades ct on ct.user_id = uid and ct.calc_version = p_calc_version and ct.trade_key = c->>'trade_key';
-  return n;
-end $$;
-revoke all on function public.replace_closed_trades(text, jsonb, jsonb) from public, anon;
-grant execute on function public.replace_closed_trades(text, jsonb, jsonb) to authenticated, service_role;
-revoke all on function public.handle_new_user() from public, anon, authenticated;
-
--- ---------------------------------------------------------------- storage
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('journal-attachments','journal-attachments', false, 10485760, array['image/png','image/jpeg','image/webp'])
-on conflict (id) do nothing;
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('reports','reports', false, 10485760, array['application/pdf'])
-on conflict (id) do nothing;
-
-create policy "own_files_select" on storage.objects for select to authenticated
-  using (bucket_id in ('journal-attachments','reports') and (storage.foldername(name))[1] = (select auth.uid())::text);
-create policy "own_files_insert" on storage.objects for insert to authenticated
-  with check (bucket_id in ('journal-attachments','reports') and (storage.foldername(name))[1] = (select auth.uid())::text);
-create policy "own_files_delete" on storage.objects for delete to authenticated
-  using (bucket_id in ('journal-attachments','reports') and (storage.foldername(name))[1] = (select auth.uid())::text);
+-- covering indexes for foreign keys
+create index on public.ai_review_feedback (user_id);
+create index on public.broker_secrets (user_id);
+create index on public.broker_sync_runs (connection_id);
+create index on public.journal_attachments (journal_entry_id);
+create index on public.journal_attachments (user_id);
+create index on public.journal_entries (strategy_id);
+create index on public.position_lots (execution_id);
+create index on public.position_lots (user_id);
+create index on public.raw_executions (batch_id);
+create index on public.raw_orders (batch_id);
+create index on public.trade_costs (user_id);
+create index on public.trading_plans (user_id);

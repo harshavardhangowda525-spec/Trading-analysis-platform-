@@ -5,7 +5,7 @@ import { addDays, localDate } from "@/lib/engine/time";
 import { serverEnv } from "@/lib/env";
 import { KiteApiError, KiteClient } from "@/lib/kite/client";
 import { decryptSecret } from "@/lib/security/crypto";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { db } from "@/lib/db";
 
 export type Interval = keyof typeof INTERVAL_MIN;
 export const INTERVALS: Interval[] = ["1minute", "5minute", "15minute", "30minute", "day"];
@@ -24,17 +24,17 @@ export interface CandleResult {
 export async function candlesForTrade(t: ClosedTrade, interval: Interval, userId: string | null): Promise<CandleResult> {
   if (t.isDemo) return { candles: demoCandles(t.entryAt, t.exitAt, t.avgEntry, t.avgExit, interval, t.tradeKey + interval), source: "synthetic_demo" };
   const env = serverEnv();
-  if (!userId || !env.serviceRoleKey || !env.kiteApiKey) return { candles: null, source: "none", reason: "Zerodha connection or server configuration not available for historical data." };
+  if (!userId || !env.databaseUrl || !env.kiteApiKey) return { candles: null, source: "none", reason: "Zerodha connection or server configuration not available for historical data." };
   try {
-    const admin = createAdminClient();
-    const [{ data: exec }, { data: conn }] = await Promise.all([
-      admin.from("raw_executions").select("payload").eq("user_id", userId).eq("exchange", t.exchange).eq("tradingsymbol", t.tradingsymbol).not("payload->instrument_token", "is", null).limit(1).maybeSingle(),
-      admin.from("broker_connections").select("id, status").eq("user_id", userId).eq("broker", "zerodha").maybeSingle(),
+    const q = db();
+    const [[exec], [conn]] = await Promise.all([
+      q`select instrument_token from raw_executions where user_id = ${userId} and exchange = ${t.exchange} and tradingsymbol = ${t.tradingsymbol} and instrument_token is not null limit 1`,
+      q`select id, status from broker_connections where user_id = ${userId} and broker = 'zerodha'`,
     ]);
-    const token = Number((exec?.payload as { instrument_token?: number } | null)?.instrument_token);
+    const token = Number(exec?.instrument_token);
     if (!token) return { candles: null, source: "none", reason: "Instrument token unknown for this symbol (CSV imports do not include it)." };
     if (!conn || !["connected", "updated", "partial"].includes(conn.status)) return { candles: null, source: "none", reason: "Reconnect Zerodha to load historical candles." };
-    const { data: secret } = await admin.from("broker_secrets").select("access_token_enc").eq("connection_id", conn.id).maybeSingle();
+    const [secret] = await q`select access_token_enc from broker_secrets where connection_id = ${conn.id} and user_id = ${userId}`;
     if (!secret) return { candles: null, source: "none", reason: "Reconnect Zerodha to load historical candles." };
     const kite = new KiteClient(env.kiteApiKey, decryptSecret(secret.access_token_enc));
     const pad = interval === "day" ? 40 : 1;

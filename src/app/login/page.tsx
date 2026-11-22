@@ -1,6 +1,6 @@
 import { BarChart3, BrainCircuit, ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/shell/Logo";
-import { isSupabaseConfigured } from "@/lib/env";
+import { isDbConfigured } from "@/lib/db";
 import { LoginForm } from "./LoginForm";
 
 export const metadata = { title: "Sign in" };
@@ -24,7 +24,7 @@ export default function LoginPage() {
       </div>
       <div className="flex flex-col items-center justify-center gap-8 px-4 py-10">
         <div className="lg:hidden"><Logo /></div>
-        <LoginForm supabase={isSupabaseConfigured()} />
+        <LoginForm enabled={isDbConfigured()} />
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ import { serverEnv } from "@/lib/env";
 import { safeEqual } from "@/lib/security/crypto";
 import { syncUser } from "@/lib/kite/sync";
 import { calendarWeek, addDays, weekdayOf, localDate } from "@/lib/engine/time";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -16,13 +16,13 @@ export async function GET(req: Request) {
   const env = serverEnv();
   const auth = req.headers.get("authorization") ?? "";
   if (!env.cronSecret || !safeEqual(auth, `Bearer ${env.cronSecret}`)) return fail("Unauthorized", 401);
-  if (!env.serviceRoleKey) return fail("Service role not configured", 501);
-  const admin = createAdminClient();
-  const { data: conns } = await admin.from("broker_connections").select("user_id").eq("broker", "zerodha").in("status", ["connected", "updated", "partial", "sync_failed", "synchronizing"]);
+  if (!env.databaseUrl) return fail("Database not configured", 501);
+  const q = db();
+  const conns = await q`select user_id from broker_connections where broker = 'zerodha' and status in ('connected','updated','partial','sync_failed','synchronizing')`;
   const results: Record<string, string> = {};
   for (const c of conns ?? []) {
     try {
-      results[c.user_id] = (await syncUser(admin, c.user_id, "scheduled")).status;
+      results[c.user_id] = (await syncUser(c.user_id, "scheduled")).status;
     } catch (e) {
       results[c.user_id] = `error: ${(e as Error).message}`;
     }
@@ -31,12 +31,10 @@ export async function GET(req: Request) {
   const today = localDate(new Date());
   if (weekdayOf(today) === 6) {
     const week = calendarWeek(new Date()).start;
-    const { data: users } = await admin.from("user_preferences").select("user_id");
-    if (users?.length)
-      await admin.from("notifications").upsert(
-        users.map((u) => ({ user_id: u.user_id, type: "weekly_report_ready", title: "Weekly report ready", body: `Your report for ${week} to ${addDays(week, 6)} is ready.`, data: { href: `/reports?week=${week}` }, dedupe_key: `weekly:${week}` })),
-        { onConflict: "user_id,dedupe_key", ignoreDuplicates: true }
-      );
+    await q`insert into notifications (user_id, type, title, body, data, dedupe_key)
+            select user_id, 'weekly_report_ready', 'Weekly report ready', ${`Your report for ${week} to ${addDays(week, 6)} is ready.`},
+                   ${JSON.stringify({ href: `/reports?week=${week}` })}::jsonb, ${`weekly:${week}`}
+            from user_preferences on conflict (user_id, dedupe_key) do nothing`;
   }
   return json({ synced: Object.keys(results).length, results });
 }

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { fail, json, requireUser } from "@/lib/api";
+import { db } from "@/lib/db";
 
 const Body = z.object({
   startingCapital: z.number().positive().max(1e11),
@@ -17,17 +18,10 @@ export async function POST(req: Request) {
   const b = Body.safeParse(await req.json().catch(() => null));
   if (!b.success) return fail(b.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
   const s = b.data;
-  const { error } = await a.sb.from("risk_settings").upsert({
-    user_id: a.user.id,
-    starting_capital: s.startingCapital,
-    max_risk_per_trade_pct: s.maxRiskPerTradePct,
-    max_daily_loss: s.maxDailyLoss,
-    max_weekly_loss: s.maxWeeklyLoss,
-    max_drawdown_pct: s.maxDrawdownPct,
-    max_trades_per_day: s.maxTradesPerDay,
-    preferred_rr: s.preferredRR,
-    updated_at: new Date().toISOString(),
-  });
-  if (error) return fail(error.message, 500);
+  await db()`insert into risk_settings (user_id, starting_capital, max_risk_per_trade_pct, max_daily_loss, max_weekly_loss, max_drawdown_pct, max_trades_per_day, preferred_rr, updated_at)
+             values (${a.user.userId}, ${s.startingCapital}, ${s.maxRiskPerTradePct}, ${s.maxDailyLoss}, ${s.maxWeeklyLoss}, ${s.maxDrawdownPct}, ${s.maxTradesPerDay}, ${s.preferredRR}, now())
+             on conflict (user_id) do update set starting_capital = excluded.starting_capital, max_risk_per_trade_pct = excluded.max_risk_per_trade_pct,
+               max_daily_loss = excluded.max_daily_loss, max_weekly_loss = excluded.max_weekly_loss, max_drawdown_pct = excluded.max_drawdown_pct,
+               max_trades_per_day = excluded.max_trades_per_day, preferred_rr = excluded.preferred_rr, updated_at = now()`;
   return json({ ok: true });
 }

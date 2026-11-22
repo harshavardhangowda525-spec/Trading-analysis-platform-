@@ -2,7 +2,7 @@ import Link from "next/link";
 import { KeyRound, Lock, PlugZap, ShieldCheck, Upload } from "lucide-react";
 import { getWorkspace } from "@/lib/data/workspace";
 import { integrationStatus, env } from "@/lib/env";
-import { createClient } from "@/lib/supabase/server";
+import { db } from "@/lib/db";
 import { BrokerActions } from "@/components/broker/BrokerActions";
 import { CsvImport } from "@/components/broker/CsvImport";
 import { STATUS_META } from "@/components/shell/nav";
@@ -25,10 +25,9 @@ export default async function BrokerPage({ searchParams }: { searchParams: Promi
   const integ = integrationStatus();
   const meta = STATUS_META[ws.connection.status] ?? STATUS_META.disconnected;
   let runs: { id: string; trigger: string; status: string; started_at: string; stats: Record<string, unknown>; error: string | null }[] = [];
-  if (ws.mode === "live") {
-    const sb = await createClient();
-    const { data } = await sb.from("broker_sync_runs").select("id, trigger, status, started_at, stats, error").order("started_at", { ascending: false }).limit(10);
-    runs = data ?? [];
+  if (ws.mode === "live" && ws.userId) {
+    const rows = await db()`select id, trigger, status, started_at, stats, error from broker_sync_runs where user_id = ${ws.userId} order by started_at desc limit 10`;
+    runs = rows.map((r) => ({ id: r.id, trigger: r.trigger, status: r.status, started_at: new Date(r.started_at).toISOString(), stats: r.stats ?? {}, error: r.error }));
   }
   const err = sp.error ? ERRORS[sp.error] ?? `Connection failed (${sp.error}).` : null;
 
@@ -49,7 +48,7 @@ export default async function BrokerPage({ searchParams }: { searchParams: Promi
                 <D k="Mode" v="Read-only analytics" />
               </dl>
               {ws.connection.lastError && <p className="rounded-xl border border-warn/25 bg-warn/[0.06] p-3 text-xs text-warn">{ws.connection.lastError}</p>}
-              <BrokerActions status={ws.connection.status} enabled={integ.kite && integ.serviceRole} signedIn={ws.mode === "live"} />
+              <BrokerActions status={ws.connection.status} enabled={integ.kite} signedIn={ws.mode === "live"} />
               <div className="rounded-xl border border-line bg-white/[0.02] p-3.5 text-xs leading-relaxed text-text-2">
                 <p className="mb-1 font-semibold text-text">How collection works</p>
                 Kite&apos;s orders and trades endpoints only cover the <strong>current trading day</strong>. TRADEOS runs a scheduled sync after market close every weekday and stores each fill permanently, so your history grows day by day. Order postbacks trigger an extra reconciliation, but an order update is never treated as an execution. Zerodha sessions expire daily around 06:00 IST — reconnect through the official login when prompted. For older trades, import Console tradebooks below.
@@ -95,7 +94,7 @@ export default async function BrokerPage({ searchParams }: { searchParams: Promi
             <ul className="mt-3 space-y-2 text-xs leading-relaxed text-text-2">
               <li className="flex gap-2"><Lock className="mt-0.5 size-3.5 shrink-0 text-text-3" /> You log in on kite.zerodha.com. TRADEOS never asks for your Zerodha password, PIN or OTP.</li>
               <li className="flex gap-2"><KeyRound className="mt-0.5 size-3.5 shrink-0 text-text-3" /> The request token is exchanged server-side; the API secret and access token never reach your browser.</li>
-              <li className="flex gap-2"><Lock className="mt-0.5 size-3.5 shrink-0 text-text-3" /> Access tokens are AES-256-GCM encrypted and stored in a table only the server can read.</li>
+              <li className="flex gap-2"><Lock className="mt-0.5 size-3.5 shrink-0 text-text-3" /> Access tokens are AES-256-GCM encrypted before they are stored, and are only ever decrypted on the server.</li>
               <li className="flex gap-2"><ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-text-3" /> Kite has no read-only scope, so TRADEOS enforces read-only access in code: only profile, orders, trades, positions, holdings, instruments and historical endpoints are allowed. No order placement exists.</li>
             </ul>
           </Panel>

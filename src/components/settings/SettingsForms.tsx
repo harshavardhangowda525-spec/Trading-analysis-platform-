@@ -2,7 +2,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Loader2, LogOut, ShieldCheck, Smartphone } from "lucide-react";
-import { createClient } from "@/lib/supabase/browser";
 import { Badge, Button, Input, Label, Select } from "@/components/ui/primitives";
 
 export function PreferencesForm({ tz, weekStart, dataMode }: { tz: string; weekStart: number; dataMode: "live" | "demo" }) {
@@ -62,68 +61,73 @@ export function PreferencesForm({ tz, weekStart, dataMode }: { tz: string; weekS
 }
 
 export function MfaCard() {
-  const sb = createClient();
-  const [factors, setFactors] = useState<{ id: string; status: string; friendly_name?: string }[]>([]);
-  const [enroll, setEnroll] = useState<{ id: string; qr: string; secret: string } | null>(null);
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [enroll, setEnroll] = useState<{ qr: string; secret: string } | null>(null);
   const [code, setCode] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = async () => {
-    const { data } = await sb.auth.mfa.listFactors();
-    setFactors((data?.totp ?? []).map((f) => ({ id: f.id, status: f.status, friendly_name: f.friendly_name })));
+  const post = async (body: object) => {
+    const res = await fetch("/api/auth/mfa", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error ?? "Request failed");
+    return d;
   };
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    fetch("/api/auth/mfa").then((r) => r.json()).then((d) => setEnabled(!!d.enabled)).catch(() => setEnabled(false));
   }, []);
 
   const start = async () => {
     setBusy(true);
     setMsg(null);
-    const { data, error } = await sb.auth.mfa.enroll({ factorType: "totp", friendlyName: `TRADEOS ${new Date().toISOString().slice(0, 10)}` });
-    setBusy(false);
-    if (error) return setMsg(error.message);
-    setEnroll({ id: data.id, qr: data.totp.qr_code, secret: data.totp.secret });
-  };
-  const verify = async () => {
-    if (!enroll) return;
-    setBusy(true);
-    const { data: ch, error: ce } = await sb.auth.mfa.challenge({ factorId: enroll.id });
-    if (ce) {
+    try {
+      setEnroll(await post({ action: "enroll" }));
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
       setBusy(false);
-      return setMsg(ce.message);
     }
-    const { error } = await sb.auth.mfa.verify({ factorId: enroll.id, challengeId: ch.id, code });
-    setBusy(false);
-    if (error) return setMsg(error.message);
-    setEnroll(null);
-    setCode("");
-    setMsg("Two-factor authentication enabled.");
-    load();
   };
-  const remove = async (id: string) => {
-    if (!confirm("Remove this authenticator? You will only need your password to sign in.")) return;
-    const { error } = await sb.auth.mfa.unenroll({ factorId: id });
-    setMsg(error ? error.message : "Authenticator removed.");
-    load();
+  const confirmCode = async () => {
+    setBusy(true);
+    try {
+      await post({ action: "confirm", code });
+      setEnroll(null);
+      setCode("");
+      setEnabled(true);
+      setMsg("Two-factor authentication enabled.");
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
-  const verified = factors.filter((f) => f.status === "verified");
+  const disable = async () => {
+    const c = prompt("Enter a current 6-digit code to disable two-factor authentication");
+    if (!c) return;
+    try {
+      await post({ action: "disable", code: c.trim() });
+      setEnabled(false);
+      setMsg("Two-factor authentication disabled.");
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  };
 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <ShieldCheck className="size-4 text-brass" />
         <span className="text-[13px] font-semibold">Authenticator app (TOTP)</span>
-        <Badge tone={verified.length ? "pos" : "warn"}>{verified.length ? "Enabled" : "Not enabled"}</Badge>
+        {enabled != null && <Badge tone={enabled ? "pos" : "warn"}>{enabled ? "Enabled" : "Not enabled"}</Badge>}
       </div>
-      {verified.map((f) => (
-        <div key={f.id} className="flex items-center justify-between rounded-xl border border-line px-3 py-2 text-xs">
-          <span className="flex items-center gap-2"><Smartphone className="size-3.5" />{f.friendly_name ?? "Authenticator"}</span>
-          <button onClick={() => remove(f.id)} className="text-neg hover:underline">Remove</button>
+      {enabled && (
+        <div className="flex items-center justify-between rounded-xl border border-line px-3 py-2 text-xs">
+          <span className="flex items-center gap-2"><Smartphone className="size-3.5" />Authenticator app</span>
+          <button onClick={disable} className="text-neg hover:underline">Disable</button>
         </div>
-      ))}
-      {!enroll && !verified.length && <Button onClick={start} disabled={busy}>{busy && <Loader2 className="size-4 animate-spin" />}Enable two-factor authentication</Button>}
+      )}
+      {enabled === false && !enroll && <Button onClick={start} disabled={busy}>{busy && <Loader2 className="size-4 animate-spin" />}Enable two-factor authentication</Button>}
       {enroll && (
         <div className="space-y-3 rounded-xl border border-line-2 p-4">
           <p className="text-xs text-text-2">Scan with Google Authenticator, 1Password, Authy or similar, then enter the 6-digit code.</p>
@@ -132,7 +136,7 @@ export function MfaCard() {
           <p className="num break-all text-[11px] text-text-3">Secret: {enroll.secret}</p>
           <div className="flex gap-2">
             <Input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} placeholder="123456" className="max-w-40" />
-            <Button variant="primary" onClick={verify} disabled={code.length !== 6 || busy}>Verify</Button>
+            <Button variant="primary" onClick={confirmCode} disabled={code.length !== 6 || busy}>Verify</Button>
           </div>
         </div>
       )}
@@ -147,8 +151,7 @@ export function SignOutButton() {
     <Button
       variant="danger"
       onClick={async () => {
-        await createClient().auth.signOut();
-        await fetch("/api/demo", { method: "DELETE" });
+        await fetch("/api/auth/logout", { method: "POST" });
         router.push("/login");
         router.refresh();
       }}

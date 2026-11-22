@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createServerClient } from "@supabase/ssr";
 
 const DEMO_COOKIE = "tradeos_demo";
-const PUBLIC_PAGES = ["/login", "/auth"];
+const SESSION_COOKIE = "tradeos_session";
+const PUBLIC_PAGES = ["/login"];
 const MACHINE_APIS = ["/api/broker/zerodha/postback", "/api/cron/"]; // authenticated by checksum / secret
 
 // Best-effort in-memory rate limiter (per instance). Use a shared store (e.g. Upstash) for strict limits.
@@ -19,57 +19,35 @@ function limited(key: string, max: number, windowMs = 60_000) {
   return b.n > max;
 }
 
-export async function middleware(req: NextRequest) {
+/**
+ * Edge gate: rate limiting, CSRF origin check and a fast redirect for visitors with no
+ * session cookie. The session itself (and MFA state) is verified server-side against
+ * the database on every request (src/lib/auth/session.ts).
+ */
+export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isApi = pathname.startsWith("/api/");
   const isMachine = MACHINE_APIS.some((p) => pathname.startsWith(p));
 
   if (isApi) {
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+    if (pathname.startsWith("/api/auth/") && pathname !== "/api/auth/logout" && req.method === "POST" && limited(`${ip}:auth`, 20)) return NextResponse.json({ error: "Too many attempts. Wait a minute." }, { status: 429 });
     const heavy = /^\/api\/(coach|import|broker|reports|reviews)/.test(pathname);
     if (limited(`${ip}:${heavy ? "heavy" : "api"}`, heavy ? 30 : 180)) return NextResponse.json({ error: "Too many requests" }, { status: 429 });
-    // CSRF: state-changing requests must come from our own origin
     if (!isMachine && !["GET", "HEAD", "OPTIONS"].includes(req.method)) {
       const origin = req.headers.get("origin");
       const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
       if (!origin || !host || new URL(origin).host !== host) return NextResponse.json({ error: "Cross-origin request blocked" }, { status: 403 });
     }
-    if (isMachine) return NextResponse.next();
+    return NextResponse.next();
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return NextResponse.next(); // demo-only deployment
-
-  let res = NextResponse.next({ request: req });
-  const sb = createServerClient(url, key, {
-    cookies: {
-      getAll: () => req.cookies.getAll(),
-      setAll: (list) => {
-        for (const { name, value } of list) req.cookies.set(name, value);
-        res = NextResponse.next({ request: req });
-        for (const { name, value, options } of list) res.cookies.set(name, value, options);
-      },
-    },
-  });
-  const { data } = await sb.auth.getUser();
-  const user = data.user;
+  if (!process.env.DATABASE_URL) return NextResponse.next(); // demo-only deployment
   const isPublic = PUBLIC_PAGES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  const hasSession = !!req.cookies.get(SESSION_COOKIE)?.value;
   const demo = req.cookies.get(DEMO_COOKIE)?.value === "1";
-
-  if (!user) {
-    if (!isApi && !isPublic && !demo) return NextResponse.redirect(new URL("/login", req.url));
-    return res;
-  }
-
-  // Enforce MFA (AAL2) when the user has a verified factor
-  const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
-  if (aal && aal.nextLevel === "aal2" && aal.currentLevel !== "aal2" && pathname !== "/login/mfa" && !pathname.startsWith("/auth")) {
-    if (isApi) return NextResponse.json({ error: "MFA verification required" }, { status: 401 });
-    return NextResponse.redirect(new URL("/login/mfa", req.url));
-  }
-  if (pathname === "/login") return NextResponse.redirect(new URL("/", req.url));
-  return res;
+  if (!isPublic && !hasSession && !demo) return NextResponse.redirect(new URL("/login", req.url));
+  return NextResponse.next();
 }
 
 export const config = {

@@ -10,8 +10,8 @@ with a deterministic engine, and reviews trades with evidence-based AI.
 
 | Area | What's implemented |
 |---|---|
-| **Auth** | Supabase Auth (email + password, magic link), TOTP MFA with AAL2 enforcement in middleware, HTTP-only session cookies |
-| **Zerodha (Mode A)** | Official Kite Connect login → server-side `request_token` exchange (SHA-256 checksum) → AES-256-GCM encrypted token in a service-role-only table. Daily scheduled collection, manual sync, postback-triggered reconciliation, positions reconciliation, reconnect detection (`TokenException`, 06:00 IST expiry), secure disconnect |
+| **Auth** | Built-in email + password (scrypt), server-side sessions (hashed tokens, HTTP-only cookies), TOTP two-factor (RFC 6238) enforced on every page and API, login lockout after 5 failures |
+| **Zerodha (Mode A)** | Official Kite Connect login → server-side `request_token` exchange (SHA-256 checksum) → AES-256-GCM encrypted token, decrypted only on the server. Daily scheduled collection, manual sync, postback-triggered reconciliation, positions reconciliation, reconnect detection (`TokenException`, 06:00 IST expiry), secure disconnect |
 | **Historical import (Mode B)** | Zerodha Console tradebook CSV + generic CSV; per-row validation; idempotent (re-imports insert nothing) |
 | **Demo (Mode C)** | Deterministic synthetic dataset, clearly labelled and never written to your account |
 | **P&L engine** | FIFO round-trip reconstruction: partial fills, scale-in/out, flips through zero, shorts, open positions; estimated vs verified charges; versioned (`fifo-v1`) |
@@ -55,39 +55,39 @@ src/
     engine/           types, time (IST), fees, reconstruct, metrics, risk, weekly  ← deterministic core
     kite/             read-only Kite client (allowlist), normalize, sync
     ai/               groq, grounding, review(+Service), coach(+Service)
+    auth/             password (scrypt), session (cookies), totp (RFC 6238)
+    db.ts             Neon serverless client
     data/             workspace (demo/live), pipeline (ingest, atomic rebuild), mappers, range
     import/csv.ts     tradebook parser
     security/crypto.ts AES-256-GCM, checksums, log redaction
   middleware.ts       session refresh, auth gate, MFA, rate limit, CSRF origin check
-supabase/migrations/  schema, RLS, storage, rebuild function, hardening
-supabase/tests/rls.sql RLS verification (rolls back)
-tests/                vitest suites + fixtures       e2e/smoke.mjs  Playwright smoke test
+db/schema.sql         Neon schema
+tests/                vitest suites + fixtures       e2e/smoke.mjs (demo) · e2e/live.mjs (real DB, two users, MFA)
 ```
 
-## Database setup
+## Database setup (Neon)
 
-A Supabase project named **tradeos** (`undmatkjencmymgmncdp`, region ap-south-1) was created and migrations `…0001_init` and `…0002_rebuild_fn` were applied. To set up another project, run every file in `supabase/migrations/` in order: `supabase db push`, or paste them into the SQL editor.
+The database is a Neon Postgres project named **tradeos** (`round-poetry-43359288`, AWS Singapore). It contains 25 tables: the 22 required tables, plus `users`, `sessions` and `broker_secrets`. The app talks to it over HTTPS with `@neondatabase/serverless`.
 
-It creates 23 tables (the 22 required plus `broker_secrets`), with UUID keys, foreign keys, indexes and RLS on every table. It also adds private storage buckets (`journal-attachments`, `reports`) scoped to `<user_id>/…`, and the atomic `rebuild_analytics` function. Verify RLS with `supabase/tests/rls.sql`.
+To recreate the schema on a new database, run `db/schema.sql` once (Neon SQL editor or `psql "$DATABASE_URL" -f db/schema.sql`).
 
-In Supabase → Authentication → URL configuration, add `<APP_URL>/auth/callback` to the redirect URLs.
+Data isolation is enforced in application code: every query on user-owned tables filters by the authenticated user's id. `e2e/live.mjs` verifies that a second user cannot read or modify the first user's trades, journal, reviews or candles. Screenshots are stored in Postgres (`journal_attachments.data`, max 5 MB, image type verified by magic bytes).
 
 ## Environment variables
 
-See `.env.example`. Required for live mode:
+See `.env.example`.
 
 | Variable | Where it comes from |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase → Project Settings → API |
-| `SUPABASE_SERVICE_ROLE_KEY` | Same page (secret). Server only; used for broker tokens, sync and audit logs |
+| `DATABASE_URL` | Neon → project → Connect (pooled connection string). Server only |
+| `TOKEN_ENCRYPTION_KEY` | `openssl rand -base64 32` (encrypts Kite tokens and TOTP secrets) |
 | `KITE_API_KEY`, `KITE_API_SECRET` | developers.kite.trade app |
-| `TOKEN_ENCRYPTION_KEY` | `openssl rand -base64 32` |
 | `CRON_SECRET` | any long random string |
 | `GROQ_API_KEY` (optional), `GROQ_MODEL` | console.groq.com. Without a key, the AI uses deterministic summaries |
 | `RESEND_API_KEY`, `REPORT_FROM_EMAIL` (optional) | resend.com for weekly emails |
 | `NEXT_PUBLIC_APP_URL` | your deployed URL |
 
-Without Supabase variables, the app runs in demo-only mode.
+Without `DATABASE_URL`, the app runs in demo-only mode.
 
 ## Zerodha Kite Connect configuration
 
@@ -143,8 +143,8 @@ BASE_URL=http://localhost:3000 npm run e2e
 Live service: **https://tradeos-4ie7.onrender.com** (Render web service `tradeos`, Singapore, free plan, auto-deploys from `claude/tradeos-trading-platform-ug65tp`).
 
 - Build: `npm ci --include=dev && npm run build` · Start: `npx next start -H 0.0.0.0 -p $PORT`
-- Set on Render: `NODE_VERSION`, `NEXT_PUBLIC_APP_URL`, Supabase URL + publishable key, `TOKEN_ENCRYPTION_KEY`, `CRON_SECRET`, `GROQ_MODEL`
-- Add in the Render dashboard (Environment): `SUPABASE_SERVICE_ROLE_KEY`, `KITE_API_KEY`, `KITE_API_SECRET`, `GROQ_API_KEY`, optional `RESEND_API_KEY` / `REPORT_FROM_EMAIL`. `NEXT_PUBLIC_*` changes need a rebuild.
+- Set on Render: `NODE_VERSION`, `NEXT_PUBLIC_APP_URL`, `DATABASE_URL`, `TOKEN_ENCRYPTION_KEY`, `CRON_SECRET`, `GROQ_MODEL`
+- Add in the Render dashboard (Environment): `KITE_API_KEY`, `KITE_API_SECRET`, `GROQ_API_KEY`, optional `RESEND_API_KEY` / `REPORT_FROM_EMAIL`. `NEXT_PUBLIC_*` changes need a rebuild.
 - Daily collection: `.github/workflows/daily-sync.yml` calls `/api/cron/sync` (needs repo secret `TRADEOS_CRON_SECRET` + variable `TRADEOS_URL`; scheduled workflows only run from the default branch). A Render Cron Job running `curl` is a paid alternative.
 - Free instances sleep after ~15 min idle; the first request after that takes up to a minute.
 
@@ -152,12 +152,12 @@ Live service: **https://tradeos-4ie7.onrender.com** (Render web service `tradeos
 
 1. Import the repo in Vercel and add all env vars (Production + Preview). Set `NEXT_PUBLIC_APP_URL` to the production URL.
 2. Deploy. `vercel.json` registers the cron, and Vercel sends `Authorization: Bearer $CRON_SECRET`.
-3. Update the Kite redirect/postback URLs and the Supabase auth redirect URL to the production domain.
-4. Backups: enable Supabase PITR or daily backups. Raw executions are preserved, so analytics can always be rebuilt (`rebuild_analytics`).
+3. Update the Kite redirect/postback URLs to the production domain.
+4. Backups: Neon keeps point-in-time history (6 h on the free plan; raise it on paid plans). Raw executions are preserved, so analytics can always be rebuilt.
 
 ## Security summary
 
-Server-only broker operations · AES-256-GCM token encryption · service-role-only secret table · RLS on all tables (verified) · MFA (TOTP, AAL2 enforced) · HTTP-only cookies · CSRF origin check · rate limiting · zod input validation · audit log (service role) · log redaction · CSP/HSTS/frame-deny headers · secure disconnect (token invalidated + deleted) · no order endpoints. Run `npm audit` for dependency scanning.
+Server-only broker operations · AES-256-GCM encryption of Kite tokens and TOTP secrets · scrypt password hashing · hashed session tokens in HTTP-only, SameSite cookies · TOTP MFA enforced server-side · login lockout and auth rate limits · per-user query scoping (tested with two users) · CSRF origin check · zod input validation · audit log · log redaction · CSP/HSTS/frame-deny headers · secure disconnect (token invalidated and deleted) · no order endpoints. Run `npm audit` for dependency scanning.
 
 ## Known limitations
 
@@ -166,6 +166,7 @@ Server-only broker operations · AES-256-GCM token encryption · service-role-on
 - Console tradebooks have no product type: same-day round trips are treated as intraday, multi-day as delivery.
 - Corporate actions (splits, bonuses) are not adjusted.
 - Unrealized P&L for open positions isn't shown (no live price feed).
+- No email verification or password-reset email yet (there's no email provider wired to auth). Password reset needs an admin for now.
 - Rate limiting is in-memory per instance. Use a shared store (e.g. Upstash) for strict limits.
 - Replay decision notes are stored in the browser (localStorage). Demo journal edits are browser-only by design.
 - In serverless environments, AI reviews are generated on first view (and queued as `pending` at sync time). There's no separate worker.

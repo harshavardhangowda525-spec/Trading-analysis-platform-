@@ -4,7 +4,7 @@ import { weekStartOf } from "@/lib/engine/time";
 import { weeklyReportPdf } from "@/lib/reports/pdf";
 import { weeklyNarrative } from "@/lib/reports/weeklyNarrative";
 import { serverEnv } from "@/lib/env";
-import { createClient } from "@/lib/supabase/server";
+import { db } from "@/lib/db";
 import { inr } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -25,14 +25,12 @@ export async function GET(req: Request) {
   const report = buildWeeklyReport(ws.trades, ws.journal, week, ws.tz);
   const narrative = await weeklyNarrative(report);
   const bytes = await weeklyReportPdf(report, tradesInWeek(ws.trades, week, ws.tz), { demo: ws.mode === "demo", narrative });
-  if (ws.mode === "live") {
-    const sb = await createClient();
-    const path = `${ws.userId}/weekly-${week}.pdf`;
-    await sb.storage.from("reports").upload(path, bytes, { contentType: "application/pdf", upsert: true });
-    await sb.from("weekly_reports").upsert(
-      { user_id: ws.userId, week_start: week, week_end: report.weekEnd, timezone: ws.tz, metrics: { ...report.metrics, bestTrade: undefined, worstTrade: undefined }, ai_review: { wentWell: report.wentWell, wentWrong: report.wentWrong, improvements: report.improvementAreas, narrative }, storage_path: path },
-      { onConflict: "user_id,week_start" }
-    );
+  if (ws.mode === "live" && ws.userId) {
+    const metrics = { ...report.metrics, bestTrade: undefined, worstTrade: undefined };
+    const ai = { wentWell: report.wentWell, wentWrong: report.wentWrong, improvements: report.improvementAreas, narrative };
+    await db()`insert into weekly_reports (user_id, week_start, week_end, timezone, metrics, ai_review)
+               values (${ws.userId}, ${week}, ${report.weekEnd}, ${ws.tz}, ${JSON.stringify(metrics)}::jsonb, ${JSON.stringify(ai)}::jsonb)
+               on conflict (user_id, week_start) do update set metrics = excluded.metrics, ai_review = excluded.ai_review, created_at = now()`;
   }
   return new Response(Buffer.from(bytes), {
     headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="tradeos-week-${week}.pdf"`, "Cache-Control": "no-store" },

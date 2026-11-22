@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { fail, json, requireUser } from "@/lib/api";
+import { db } from "@/lib/db";
 
 const TZ = (() => {
   try {
@@ -24,7 +25,15 @@ export async function POST(req: Request) {
   if ("res" in a) return a.res;
   const b = Body.safeParse(await req.json().catch(() => null));
   if (!b.success) return fail(b.error.issues.map((i) => i.message).join("; "));
-  const { error } = await a.sb.from("user_preferences").upsert({ user_id: a.user.id, ...b.data, updated_at: new Date().toISOString() });
-  if (error) return fail(error.message, 500);
+  const p = b.data;
+  await db()`insert into user_preferences (user_id) values (${a.user.userId}) on conflict do nothing`;
+  await db()`update user_preferences set
+               dashboard_layout = coalesce(${p.dashboard_layout ? JSON.stringify(p.dashboard_layout) : null}::jsonb, dashboard_layout),
+               timezone = coalesce(${p.timezone ?? null}, timezone),
+               week_start = coalesce(${p.week_start ?? null}::smallint, week_start),
+               data_mode = coalesce(${p.data_mode ?? null}, data_mode),
+               email_reports = coalesce(${p.email_reports ?? null}::boolean, email_reports),
+               updated_at = now()
+             where user_id = ${a.user.userId}`;
   return json({ ok: true });
 }

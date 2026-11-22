@@ -12,8 +12,7 @@
     "e2e": "node e2e/smoke.mjs"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.12.7",
-    "@supabase/supabase-js": "^2.119.0",
+    "@neondatabase/serverless": "^1.2.1",
     "clsx": "^2.1.1",
     "lightweight-charts": "^4.2.3",
     "lucide-react": "^1.71.0",
@@ -21,6 +20,7 @@
     "next": "15.5.29",
     "papaparse": "^5.7.0",
     "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "recharts": "^3.10.1",
@@ -33,6 +33,7 @@
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/papaparse": "^5.5.2",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

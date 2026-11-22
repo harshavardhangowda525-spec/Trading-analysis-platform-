@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getWorkspace } from "@/lib/data/workspace";
-import { integrationStatus, isSupabaseConfigured } from "@/lib/env";
-import { createClient } from "@/lib/supabase/server";
+import { integrationStatus } from "@/lib/env";
+import { db, isDbConfigured } from "@/lib/db";
 import { MfaCard, PreferencesForm, SignOutButton } from "@/components/settings/SettingsForms";
 import { Badge, PageTitle, Panel, PanelHeader, buttonClass } from "@/components/ui/primitives";
 
@@ -12,9 +12,8 @@ export default async function SettingsPage() {
   const integ = integrationStatus();
   let dataMode: "live" | "demo" = ws.mode;
   if (ws.userId) {
-    const sb = await createClient();
-    const { data } = await sb.from("user_preferences").select("data_mode").maybeSingle();
-    dataMode = (data?.data_mode as "live" | "demo") ?? "live";
+    const [p] = await db()`select data_mode from user_preferences where user_id = ${ws.userId}`;
+    dataMode = (p?.data_mode as "live" | "demo") ?? "live";
   }
   return (
     <>
@@ -31,7 +30,7 @@ export default async function SettingsPage() {
             ) : (
               <>
                 <p className="text-text-2">You are exploring the synthetic demo without an account.</p>
-                {isSupabaseConfigured() && <Link href="/login" className={buttonClass("primary")}>Sign in or create account</Link>}
+                {isDbConfigured() && <Link href="/login" className={buttonClass("primary")}>Sign in or create account</Link>}
               </>
             )}
           </div>
@@ -50,8 +49,8 @@ export default async function SettingsPage() {
           <PanelHeader title="Server integrations" subtitle="Configured through environment variables — values are never shown" />
           <ul className="grid gap-2 p-5 text-[13px] sm:grid-cols-3">
             {[
-              ["Supabase (auth & database)", integ.supabase],
-              ["Service role (sync jobs)", integ.serviceRole],
+              ["Neon Postgres (database & auth)", integ.database],
+              ["Token encryption key", integ.encryption],
               ["Zerodha Kite Connect", integ.kite],
               ["Groq LLM", integ.groq],
               ["Email (Resend)", integ.email],

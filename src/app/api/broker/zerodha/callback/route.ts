@@ -6,7 +6,7 @@ import { audit } from "@/lib/data/pipeline";
 import { KiteApiError, KiteClient } from "@/lib/kite/client";
 import { syncUser, tokenExpiry } from "@/lib/kite/sync";
 import { encryptSecret, safeEqual } from "@/lib/security/crypto";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -32,34 +32,20 @@ export async function GET(req: Request) {
     const session = await new KiteClient(kiteApiKey, null).generateSession(requestToken, kiteApiSecret);
     const kite = new KiteClient(kiteApiKey, session.access_token);
     const profile = await kite.profile(); // validates the account/session
-    const admin = createAdminClient();
-    const now = new Date();
-    const { data: conn, error } = await admin
-      .from("broker_connections")
-      .upsert(
-        {
-          user_id: a.user.id,
-          broker: "zerodha",
-          broker_user_id: profile.user_id,
-          broker_user_name: profile.user_name,
-          status: "connected",
-          last_error: null,
-          token_expires_at: tokenExpiry(now),
-          connected_at: now.toISOString(),
-          disconnected_at: null,
-          updated_at: now.toISOString(),
-        },
-        { onConflict: "user_id,broker" }
-      )
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
-    await admin.from("broker_secrets").upsert({ connection_id: conn.id, user_id: a.user.id, access_token_enc: encryptSecret(session.access_token), updated_at: now.toISOString() });
-    await audit(a.user.id, "broker.connected", { broker: "zerodha", broker_user_id: profile.user_id }, "broker_connections", conn.id, clientIp(req));
-    after(() => syncUser(admin, a.user.id, "connect").catch(() => undefined));
+    const q = db();
+    const uid = a.user.userId;
+    const [conn] = await q`insert into broker_connections (user_id, broker, broker_user_id, broker_user_name, status, last_error, token_expires_at, connected_at, disconnected_at, updated_at)
+      values (${uid}, 'zerodha', ${profile.user_id}, ${profile.user_name}, 'connected', null, ${tokenExpiry(new Date())}, now(), null, now())
+      on conflict (user_id, broker) do update set broker_user_id = excluded.broker_user_id, broker_user_name = excluded.broker_user_name,
+        status = 'connected', last_error = null, token_expires_at = excluded.token_expires_at, connected_at = now(), disconnected_at = null, updated_at = now()
+      returning id`;
+    await q`insert into broker_secrets (connection_id, user_id, access_token_enc, updated_at) values (${conn.id}, ${uid}, ${encryptSecret(session.access_token)}, now())
+            on conflict (connection_id) do update set access_token_enc = excluded.access_token_enc, updated_at = now()`;
+    await audit(uid, "broker.connected", { broker: "zerodha", broker_user_id: profile.user_id }, "broker_connections", conn.id, clientIp(req));
+    after(() => syncUser(uid, "connect").catch(() => undefined));
     return back("connected=1");
   } catch (e) {
-    await audit(a.user.id, "broker.connect_failed", { message: (e as Error).message });
+    await audit(a.user.userId, "broker.connect_failed", { message: (e as Error).message });
     return back(`error=${e instanceof KiteApiError ? "kite_" + e.errorType : "exchange_failed"}`);
   }
 }
