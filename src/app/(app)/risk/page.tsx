@@ -42,7 +42,7 @@ export default async function RiskPage() {
               <KV k="Largest loss" v={<Pnl value={s.largestLoss} />} />
               <KV k="Consecutive losses" v={<span className="num">{s.consecutiveLosses}</span>} />
               <KV k="Risk-per-trade checks" v={<span className="num">{s.riskPerTrade.length ? `${within}/${s.riskPerTrade.length}` : "—"}</span>} sub={`within ${ws.risk.maxRiskPerTradePct}% of capital`} />
-              <KV k="Discipline score" v={<span className="num metal-text text-xl">{s.score}</span>} sub="out of 100" />
+              <KV k="Discipline score" v={<span className="num metal-text text-xl">{ws.trades.length ? s.score : "—"}</span>} sub={ws.trades.length ? "out of 100" : "after your first trades"} />
             </div>
           </Panel>
           <Panel>

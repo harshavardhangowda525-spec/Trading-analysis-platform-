@@ -91,10 +91,10 @@ Without `DATABASE_URL`, the app runs in demo-only mode.
 
 ## Zerodha Kite Connect configuration
 
-1. Create an app at <https://developers.kite.trade> (Connect plan). Historical candles for replay need the historical-data add-on.
+1. Create an app at <https://developers.kite.trade>. The free **Personal** plan covers orders, trades, positions and holdings (everything needed to record trades); the paid Connect plan (₹500/month) adds historical candles for replay of real trades.
 2. **Redirect URL**: `https://<your-domain>/api/broker/zerodha/callback`
 3. **Postback URL** (optional): `https://<your-domain>/api/broker/zerodha/postback`
-4. Put the API key and secret in the server env. Sign in to TRADEOS → **Broker Connections** → **Connect Zerodha**.
+4. Sign in to TRADEOS → **Broker Connections** → paste the app's API key and secret into **Your Kite Connect app** (stored encrypted per user; `KITE_API_KEY`/`KITE_API_SECRET` env vars remain as a server-wide fallback) → **Connect Zerodha**.
 5. Kite logs you out daily (~06:00 IST). The app shows *Reconnection required*, and you reconnect through the official login. OTP is never automated.
 6. Kite's `/orders` and `/trades` only cover **today**, so the daily cron (16:45 IST, Mon–Fri, `vercel.json`) is what builds history. Import Console tradebooks for older trades.
 
@@ -145,8 +145,8 @@ Live service: **https://tradeos-4ie7.onrender.com** (Render web service `tradeos
 - Build: `npm ci --include=dev && npm run build` · Start: `npx next start -H 0.0.0.0 -p $PORT`
 - Set on Render: `NODE_VERSION`, `NEXT_PUBLIC_APP_URL`, `DATABASE_URL`, `TOKEN_ENCRYPTION_KEY`, `CRON_SECRET`, `GROQ_MODEL`
 - Add in the Render dashboard (Environment): `KITE_API_KEY`, `KITE_API_SECRET`, `GROQ_API_KEY`, optional `RESEND_API_KEY` / `REPORT_FROM_EMAIL`. `NEXT_PUBLIC_*` changes need a rebuild.
-- Daily collection: `.github/workflows/daily-sync.yml` calls `/api/cron/sync` (needs repo secret `TRADEOS_CRON_SECRET` + variable `TRADEOS_URL`; scheduled workflows only run from the default branch). A Render Cron Job running `curl` is a paid alternative.
-- Free instances sleep after ~15 min idle; the first request after that takes up to a minute.
+- Daily collection & keep-warm: a Neon Function (`scheduler`, source in `db/scheduler/index.mjs`) with schedule triggers — sync at 13:00, 15:50 and 23:00 IST and a keep-warm ping every 10 min 08:50–16:30 IST (Mon–Fri). It calls `/api/cron/sync` with `CRON_SECRET`; runs are deduplicated in the database (10-minute window). The app also syncs automatically when you open it (throttled).
+- Free instances sleep after ~15 min idle outside the keep-warm window; the first request after that takes up to a minute.
 
 ## Deploy (Vercel)
 

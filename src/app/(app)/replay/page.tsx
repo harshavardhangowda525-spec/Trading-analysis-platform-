@@ -11,7 +11,7 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
   const ws = await getWorkspace();
   const recent = [...ws.trades].reverse().slice(0, 40);
   const t = ws.trades.find((x) => x.tradeKey === sp.trade) ?? recent[0];
-  if (!t) return (<><PageTitle title="Trade Replay" /><Panel><Empty title="No trades to replay" /></Panel></>);
+  if (!t) return (<><PageTitle title="Trade Replay" /><Panel><Empty title="No trades to replay yet" body="Each completed trade can be replayed candle by candle. Note: real-trade candles need the paid Kite Connect plan; the free Personal plan still records every trade." /></Panel></>);
   const j = ws.journal.get(t.tradeKey);
   return (
     <>

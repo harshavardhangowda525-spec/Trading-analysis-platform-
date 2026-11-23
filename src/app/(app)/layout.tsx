@@ -1,9 +1,12 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import Link from "next/link";
-import { FlaskConical } from "lucide-react";
+import { FlaskConical, Link2 } from "lucide-react";
 import { getWorkspace } from "@/lib/data/workspace";
-import { isDbConfigured } from "@/lib/db";
+import { claimJob, isDbConfigured } from "@/lib/db";
+import { syncUser } from "@/lib/kite/sync";
+import { zonedParts } from "@/lib/engine/time";
 import { BottomDock, Sidebar } from "@/components/shell/Navigation";
 import { TopBar } from "@/components/shell/TopBar";
 
@@ -18,6 +21,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     if ((e as Error).message === "MFA_REQUIRED") redirect("/login/mfa");
     throw e;
   }
+  // Auto-sync on visit (throttled to once per 10 minutes per user, trading hours only)
+  const live = ws.mode === "live" && ws.userId;
+  const syncable = live && ["connected", "updated", "partial"].includes(ws.connection.status);
+  const istHour = zonedParts(new Date()).hour;
+  if (syncable && istHour >= 9 && istHour <= 23) {
+    const uid = ws.userId!;
+    after(async () => {
+      if (await claimJob(`autosync:${uid}`, 10)) await syncUser(uid, "manual").catch(() => undefined);
+    });
+  }
+  const needsReconnect = live && ws.connection.status === "reconnect_required";
+
   return (
     <div className="flex min-h-dvh">
       <Suspense>
@@ -32,6 +47,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             notifications={ws.notifications.map((n) => ({ id: n.id, title: n.title, body: n.body, createdAt: n.createdAt, readAt: n.readAt, href: n.href }))}
           />
         </Suspense>
+        {needsReconnect && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-brass/25 bg-brass/[0.08] px-4 py-2.5 text-[12.5px] text-brass sm:px-6" role="status">
+            <span><strong>Reconnect Zerodha for today.</strong> Zerodha logs API sessions out every morning at 06:00 IST, so your trades can&apos;t be recorded until you reconnect.</span>
+            <a href="/api/broker/zerodha/login" className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brass/90 px-3 text-xs font-semibold text-black hover:bg-brass"><Link2 className="size-3.5" />Reconnect</a>
+          </div>
+        )}
         {ws.mode === "demo" && (
           <div className="border-b border-warn/20 bg-warn/[0.07] px-4 py-2 text-[12px] text-warn sm:px-6">
             <FlaskConical className="mr-1.5 inline size-3.5 -translate-y-px" aria-hidden />

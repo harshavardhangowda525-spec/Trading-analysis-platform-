@@ -10,6 +10,8 @@ import { buildInsights } from "@/lib/insights";
 import { Badge, Empty, PageTitle, Panel, PanelHeader, Pnl, Provenance, buttonClass } from "@/components/ui/primitives";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { DashboardGrid, type Widget } from "@/components/dashboard/DashboardGrid";
+import { GettingStarted, type SetupStep } from "@/components/dashboard/GettingStarted";
+import { NotebookPen } from "lucide-react";
 import { EquityCurve, PnlBars, PnlCalendar, WinLossDonut } from "@/components/charts/Charts";
 import { TradeRow, toLite } from "@/components/journal/TradeRow";
 import { cn, duration, fmtDate, inr, pct } from "@/lib/utils";
@@ -33,16 +35,27 @@ export default async function Overview({ searchParams }: { searchParams: Promise
   for (const d of b.daily) cal[d.key] = { pnl: d.netPnl, trades: d.trades };
   const lastMonth = (b.daily[b.daily.length - 1]?.key ?? localDate(new Date(), ws.tz)).slice(0, 7);
   const costLabel = m.costsAllVerified ? "verified" : "estimated";
+  const connected = ["connected", "updated", "partial", "synchronizing"].includes(ws.connection.status);
+  const steps: SetupStep[] = [
+    { done: ws.setup.kiteApp, title: "Add your Kite Connect app", body: "Create a free Personal app on developers.kite.trade and paste its API key and secret.", href: "/broker", cta: "Open setup guide" },
+    { done: connected, title: "Connect Zerodha (each morning)", body: "Zerodha logs API sessions out daily at 06:00 IST. Reconnect once per trading day.", href: "/broker", cta: "Connect Zerodha" },
+    { done: ws.setup.riskCustomized, title: "Set your risk limits", body: "Capital, max loss per day and week, trades per day. Drives alerts and your discipline score.", href: "/risk", cta: "Set limits" },
+    { done: ws.setup.totp, title: "Turn on two-factor sign-in", body: "Protects your trading records with an authenticator app.", href: "/settings", cta: "Enable 2FA" },
+    { done: ws.dataQuality.executions > 0, title: "Import past trades", body: "Upload a Zerodha Console tradebook CSV to analyse your history from day one.", href: "/broker", cta: "Import CSV", optional: true },
+  ];
+  const setupIncomplete = ws.mode === "live" && steps.some((s) => !s.optional && !s.done);
+  const unjournaled = [...ws.trades].reverse().filter((t) => !ws.journal.has(t.tradeKey)).slice(0, 5);
 
   if (!ws.trades.length) {
     return (
       <>
         <PageTitle kicker="Mission control" title="Overview" />
+        {ws.mode === "live" && <GettingStarted steps={steps} />}
         <Panel>
           <Empty
             icon={<Wallet className="size-8" />}
             title="No trades yet"
-            body="Connect Zerodha for daily automatic collection, or import your Console tradebook CSV to rebuild your history."
+            body="Once Zerodha is connected, every trade you take is recorded automatically and appears here with its P&L, charges and an evidence-based review. You can also import a Console tradebook CSV to analyse past trades."
             action={<Link href="/broker" className={buttonClass("primary")}>Connect or import</Link>}
           />
         </Panel>
@@ -145,6 +158,18 @@ export default async function Overview({ searchParams }: { searchParams: Promise
       ),
     },
     {
+      id: "review",
+      title: "Trades needing your notes",
+      node: (
+        <Panel className="h-full">
+          <PanelHeader icon={<NotebookPen className="size-4" />} title="Needs your notes" subtitle="Add your reasoning so reviews can judge process, not just outcome" action={<Link href="/journal?filter=unjournaled" className="text-xs text-text-3 hover:text-text">All</Link>} />
+          <div className="px-1 pb-3 pt-1">
+            {unjournaled.length === 0 ? <p className="px-4 py-3 text-xs text-text-3">Every recent trade has journal notes. Nice discipline.</p> : unjournaled.map((t) => <TradeRow key={t.tradeKey} t={toLite(t, null)} tz={ws.tz} />)}
+          </div>
+        </Panel>
+      ),
+    },
+    {
       id: "insights",
       title: "AI performance insights",
       node: (
@@ -213,6 +238,7 @@ export default async function Overview({ searchParams }: { searchParams: Promise
 
   return (
     <>
+      {setupIncomplete && <GettingStarted steps={steps} />}
       <PageTitle kicker="Mission control" title="Overview">
         <div className="flex items-center gap-2">
           {ws.mode === "demo" && <Provenance kind="demo" />}

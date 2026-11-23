@@ -22,7 +22,7 @@ export function BrokerActions({ status, enabled, signedIn }: { status: string; e
   };
 
   if (!signedIn) return <p className="text-xs text-text-3">Sign in to connect a broker account.</p>;
-  if (!enabled) return <p className="text-xs text-warn">The Zerodha integration is not configured on this server (KITE_API_KEY, KITE_API_SECRET, TOKEN_ENCRYPTION_KEY, SUPABASE_SERVICE_ROLE_KEY).</p>;
+  if (!enabled) return <p className="text-xs text-text-3">Save your Kite Connect API key and secret above to enable Connect Zerodha.</p>;
 
   return (
     <div className="space-y-2">

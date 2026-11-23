@@ -5,6 +5,7 @@ import { integrationStatus, env } from "@/lib/env";
 import { db } from "@/lib/db";
 import { BrokerActions } from "@/components/broker/BrokerActions";
 import { CsvImport } from "@/components/broker/CsvImport";
+import { KiteAppSetup } from "@/components/broker/KiteAppSetup";
 import { STATUS_META } from "@/components/shell/nav";
 import { Badge, PageTitle, Panel, PanelHeader } from "@/components/ui/primitives";
 import { fmtDateTime, relTime } from "@/lib/utils";
@@ -16,7 +17,7 @@ const ERRORS: Record<string, string> = {
   login_cancelled: "Zerodha login was cancelled.",
   missing_token: "Zerodha did not return a request token.",
   exchange_failed: "Could not complete the token exchange. Check the API key/secret and redirect URL.",
-  kite_not_configured: "Zerodha integration is not configured on the server.",
+  kite_not_configured: "Add your Kite Connect API key and secret first (step 1 below).",
 };
 
 export default async function BrokerPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
@@ -25,6 +26,10 @@ export default async function BrokerPage({ searchParams }: { searchParams: Promi
   const integ = integrationStatus();
   const meta = STATUS_META[ws.connection.status] ?? STATUS_META.disconnected;
   let runs: { id: string; trigger: string; status: string; started_at: string; stats: Record<string, unknown>; error: string | null }[] = [];
+  let app: { api_key: string } | undefined;
+  if (ws.mode === "live" && ws.userId) [app] = (await db()`select api_key from kite_apps where user_id = ${ws.userId}`) as { api_key: string }[];
+  const serverFallback = Boolean(integ.kite);
+  const credsReady = Boolean(app) || serverFallback;
   if (ws.mode === "live" && ws.userId) {
     const rows = await db()`select id, trigger, status, started_at, stats, error from broker_sync_runs where user_id = ${ws.userId} order by started_at desc limit 10`;
     runs = rows.map((r) => ({ id: r.id, trigger: r.trigger, status: r.status, started_at: new Date(r.started_at).toISOString(), stats: r.stats ?? {}, error: r.error }));
@@ -48,10 +53,12 @@ export default async function BrokerPage({ searchParams }: { searchParams: Promi
                 <D k="Mode" v="Read-only analytics" />
               </dl>
               {ws.connection.lastError && <p className="rounded-xl border border-warn/25 bg-warn/[0.06] p-3 text-xs text-warn">{ws.connection.lastError}</p>}
-              <BrokerActions status={ws.connection.status} enabled={integ.kite} signedIn={ws.mode === "live"} />
+              {ws.mode === "live" && <KiteAppSetup appUrl={env.appUrl} configured={Boolean(app)} apiKeyHint={app ? `${app.api_key.slice(0, 4)}…${app.api_key.slice(-2)}` : null} serverFallback={serverFallback} />}
+              <div className="hairline" />
+              <BrokerActions status={ws.connection.status} enabled={credsReady} signedIn={ws.mode === "live"} />
               <div className="rounded-xl border border-line bg-white/[0.02] p-3.5 text-xs leading-relaxed text-text-2">
                 <p className="mb-1 font-semibold text-text">How collection works</p>
-                Kite&apos;s orders and trades endpoints only cover the <strong>current trading day</strong>. TRADEOS runs a scheduled sync after market close every weekday and stores each fill permanently, so your history grows day by day. Order postbacks trigger an extra reconciliation, but an order update is never treated as an execution. Zerodha sessions expire daily around 06:00 IST — reconnect through the official login when prompted. For older trades, import Console tradebooks below.
+                Kite&apos;s orders and trades endpoints only cover the <strong>current trading day</strong>. TRADEOS runs a scheduled sync after market close every weekday and stores each fill permanently, so your history grows day by day. Order postbacks trigger an extra reconciliation, but an order update is never treated as an execution. Zerodha logs every API session out daily around 06:00 IST, so tap <strong>Connect Zerodha</strong> once each trading morning (it takes a few seconds). TRADEOS then syncs automatically whenever you open the app and after market close. For older trades, import Console tradebooks below.
               </div>
             </div>
           </Panel>

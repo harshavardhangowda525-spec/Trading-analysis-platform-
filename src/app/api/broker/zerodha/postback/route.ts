@@ -2,6 +2,7 @@ import { after } from "next/server";
 import { fail, json } from "@/lib/api";
 import { serverEnv } from "@/lib/env";
 import { postbackChecksum } from "@/lib/kite/client";
+import { getKiteCredsByBrokerUser } from "@/lib/kite/credentials";
 import { syncUser } from "@/lib/kite/sync";
 import { safeEqual } from "@/lib/security/crypto";
 import { db } from "@/lib/db";
@@ -15,7 +16,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request) {
   const env = serverEnv();
-  if (!env.kiteApiSecret || !env.databaseUrl) return fail("Not configured", 501);
+  if (!env.databaseUrl) return fail("Not configured", 501);
   const raw = await req.text();
   if (raw.length > 64_000) return fail("Payload too large", 413);
   let p: { order_id?: string; order_timestamp?: string; checksum?: string; user_id?: string; status?: string; tradingsymbol?: string; exchange?: string };
@@ -25,11 +26,11 @@ export async function POST(req: Request) {
     return fail("Invalid JSON");
   }
   if (!p.order_id || !p.order_timestamp || !p.checksum || !p.user_id) return fail("Missing fields");
-  if (!safeEqual(postbackChecksum(p.order_id, p.order_timestamp, env.kiteApiSecret), p.checksum)) return fail("Bad checksum", 401);
-
+  const found = await getKiteCredsByBrokerUser(p.user_id);
+  if (!found) return json({ ok: true }); // unknown account — acknowledge without action
+  if (!safeEqual(postbackChecksum(p.order_id, p.order_timestamp, found.creds.apiSecret), p.checksum)) return fail("Bad checksum", 401);
   const q = db();
-  const [conn] = await q`select user_id, status from broker_connections where broker = 'zerodha' and broker_user_id = ${p.user_id}`;
-  if (!conn) return json({ ok: true }); // unknown account — acknowledge without action
+  const conn = { user_id: found.userId, status: found.status };
   const payload = { ...p, checksum: undefined };
   await q`insert into raw_orders (user_id, broker_order_id, status, tradingsymbol, exchange, payload)
           values (${conn.user_id}, ${p.order_id}, ${p.status ?? null}, ${p.tradingsymbol ?? null}, ${p.exchange ?? null}, ${JSON.stringify(payload)}::jsonb)

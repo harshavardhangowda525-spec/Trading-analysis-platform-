@@ -10,11 +10,14 @@ export function PreferencesForm({ tz, weekStart, dataMode }: { tz: string; weekS
   const [err, setErr] = useState<string | null>(null);
   const router = useRouter();
   const zones = (() => {
+    let list: string[] = [];
     try {
-      return Intl.supportedValuesOf("timeZone");
+      list = Intl.supportedValuesOf("timeZone");
     } catch {
-      return ["Asia/Kolkata", "UTC"];
+      list = ["UTC"];
     }
+    // Browsers may list Asia/Calcutta instead of Asia/Kolkata; always include the saved zone and IST.
+    return [...new Set([tz, "Asia/Kolkata", ...list.filter((z) => z !== "Asia/Calcutta")])].sort();
   })();
   const save = async () => {
     setState("saving");

@@ -3,7 +3,7 @@ import { serverEnv } from "@/lib/env";
 import { safeEqual } from "@/lib/security/crypto";
 import { syncUser } from "@/lib/kite/sync";
 import { calendarWeek, addDays, weekdayOf, localDate } from "@/lib/engine/time";
-import { db } from "@/lib/db";
+import { claimJob, db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -17,8 +17,9 @@ export async function GET(req: Request) {
   const auth = req.headers.get("authorization") ?? "";
   if (!env.cronSecret || !safeEqual(auth, `Bearer ${env.cronSecret}`)) return fail("Unauthorized", 401);
   if (!env.databaseUrl) return fail("Database not configured", 501);
+  if (!(await claimJob("cron:sync", 10))) return json({ skipped: "ran within the last 10 minutes" });
   const q = db();
-  const conns = await q`select user_id from broker_connections where broker = 'zerodha' and status in ('connected','updated','partial','sync_failed','synchronizing')`;
+  const conns = await q`select user_id from broker_connections where broker = 'zerodha' and status in ('connected','updated','partial','sync_failed','synchronizing') and (token_expires_at is null or token_expires_at > now())`;
   const results: Record<string, string> = {};
   for (const c of conns ?? []) {
     try {

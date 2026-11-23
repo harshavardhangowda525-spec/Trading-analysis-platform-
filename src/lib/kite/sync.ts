@@ -1,5 +1,5 @@
 import "server-only";
-import { serverEnv } from "@/lib/env";
+import { getKiteCreds } from "./credentials";
 import { db } from "@/lib/db";
 import { decryptSecret } from "@/lib/security/crypto";
 import { addDays, localDate, zonedToUtc } from "@/lib/engine/time";
@@ -31,7 +31,8 @@ export interface SyncOutcome {
  */
 export async function syncUser(userId: string, trigger: SyncTrigger): Promise<SyncOutcome> {
   const q = db();
-  const { kiteApiKey } = serverEnv();
+  const creds = await getKiteCreds(userId);
+  if (!creds) return { status: "skipped", message: "Kite Connect app not configured" };
   const [conn] = await q`select * from broker_connections where user_id = ${userId} and broker = 'zerodha'`;
   if (!conn || conn.status === "disconnected") return { status: "skipped", message: "No active Zerodha connection" };
   const [secret] = await q`select access_token_enc from broker_secrets where connection_id = ${conn.id} and user_id = ${userId}`;
@@ -42,7 +43,7 @@ export async function syncUser(userId: string, trigger: SyncTrigger): Promise<Sy
   await q`update broker_connections set status = 'synchronizing', updated_at = now() where id = ${conn.id}`;
 
   try {
-    const kite = new KiteClient(kiteApiKey, decryptSecret(secret.access_token_enc));
+    const kite = new KiteClient(creds.apiKey, decryptSecret(secret.access_token_enc));
     const [trades, orders, positions, holdings] = await Promise.all([kite.trades(), kite.orders(), kite.positions(), kite.holdings()]);
 
     // Preserve raw order history (status snapshots are NOT treated as executions)

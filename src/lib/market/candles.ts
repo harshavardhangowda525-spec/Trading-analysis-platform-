@@ -6,6 +6,7 @@ import { serverEnv } from "@/lib/env";
 import { KiteApiError, KiteClient } from "@/lib/kite/client";
 import { decryptSecret } from "@/lib/security/crypto";
 import { db } from "@/lib/db";
+import { getKiteCreds } from "@/lib/kite/credentials";
 
 export type Interval = keyof typeof INTERVAL_MIN;
 export const INTERVALS: Interval[] = ["1minute", "5minute", "15minute", "30minute", "day"];
@@ -24,7 +25,8 @@ export interface CandleResult {
 export async function candlesForTrade(t: ClosedTrade, interval: Interval, userId: string | null): Promise<CandleResult> {
   if (t.isDemo) return { candles: demoCandles(t.entryAt, t.exitAt, t.avgEntry, t.avgExit, interval, t.tradeKey + interval), source: "synthetic_demo" };
   const env = serverEnv();
-  if (!userId || !env.databaseUrl || !env.kiteApiKey) return { candles: null, source: "none", reason: "Zerodha connection or server configuration not available for historical data." };
+  const creds = userId ? await getKiteCreds(userId) : null;
+  if (!userId || !env.databaseUrl || !creds) return { candles: null, source: "none", reason: "Zerodha connection or server configuration not available for historical data." };
   try {
     const q = db();
     const [[exec], [conn]] = await Promise.all([
@@ -36,7 +38,7 @@ export async function candlesForTrade(t: ClosedTrade, interval: Interval, userId
     if (!conn || !["connected", "updated", "partial"].includes(conn.status)) return { candles: null, source: "none", reason: "Reconnect Zerodha to load historical candles." };
     const [secret] = await q`select access_token_enc from broker_secrets where connection_id = ${conn.id} and user_id = ${userId}`;
     if (!secret) return { candles: null, source: "none", reason: "Reconnect Zerodha to load historical candles." };
-    const kite = new KiteClient(env.kiteApiKey, decryptSecret(secret.access_token_enc));
+    const kite = new KiteClient(creds.apiKey, decryptSecret(secret.access_token_enc));
     const pad = interval === "day" ? 40 : 1;
     const from = `${addDays(localDate(t.entryAt), -pad)} 09:15:00`;
     const to = `${addDays(localDate(t.exitAt), interval === "day" ? 10 : 0)} 15:30:00`;
@@ -48,7 +50,7 @@ export async function candlesForTrade(t: ClosedTrade, interval: Interval, userId
     };
   } catch (e) {
     if (e instanceof KiteApiError && (e.errorType === "PermissionException" || e.status === 403))
-      return { candles: null, source: "none", reason: "Historical data is not enabled for this Kite Connect app (requires the historical data add-on)." };
+      return { candles: null, source: "none", reason: "Historical candles are not included in the free Kite Connect Personal plan (the paid Connect plan includes them)." };
     return { candles: null, source: "none", reason: `Historical data unavailable: ${(e as Error).message}` };
   }
 }

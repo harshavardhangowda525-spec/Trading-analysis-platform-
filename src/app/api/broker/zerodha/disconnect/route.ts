@@ -1,5 +1,5 @@
 import { clientIp, json, requireUser } from "@/lib/api";
-import { serverEnv } from "@/lib/env";
+import { getKiteCreds } from "@/lib/kite/credentials";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/data/pipeline";
 import { KiteClient } from "@/lib/kite/client";
@@ -16,9 +16,10 @@ export async function POST(req: Request) {
   const [conn] = await q`select id from broker_connections where user_id = ${uid} and broker = 'zerodha'`;
   if (!conn) return json({ ok: true });
   const [secret] = await q`select access_token_enc from broker_secrets where connection_id = ${conn.id} and user_id = ${uid}`;
-  if (secret) {
+  const creds = await getKiteCreds(uid);
+  if (secret && creds) {
     try {
-      await new KiteClient(serverEnv().kiteApiKey, decryptSecret(secret.access_token_enc)).invalidateSession();
+      await new KiteClient(creds.apiKey, decryptSecret(secret.access_token_enc)).invalidateSession();
     } catch {
       /* token may already be expired — still delete locally */
     }

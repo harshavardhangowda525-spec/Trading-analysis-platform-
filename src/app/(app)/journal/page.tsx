@@ -2,7 +2,8 @@ import { getWorkspace } from "@/lib/data/workspace";
 import { filterTrades, parseRange } from "@/lib/data/range";
 import { JournalList } from "@/components/journal/JournalList";
 import { toLite } from "@/components/journal/TradeRow";
-import { Badge, PageTitle, Panel, PanelHeader } from "@/components/ui/primitives";
+import Link from "next/link";
+import { Badge, Empty, PageTitle, Panel, PanelHeader, buttonClass } from "@/components/ui/primitives";
 import { fmtDateTime, inr } from "@/lib/utils";
 
 export const metadata = { title: "Trading Journal" };
@@ -40,7 +41,13 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
           </div>
         </Panel>
       )}
-      <JournalList trades={trades} strategies={ws.strategies} tz={ws.tz} initialFilter={sp.filter} />
+      {ws.trades.length === 0 ? (
+        <Panel>
+          <Empty title="Your journal is empty" body="Every completed trade creates a journal entry automatically. Add your entry reason, stop-loss and mistakes so TRADEOS can tell process errors from bad luck." action={<Link href="/broker" className={buttonClass("primary")}>Connect Zerodha</Link>} />
+        </Panel>
+      ) : (
+        <JournalList trades={trades} strategies={ws.strategies} tz={ws.tz} initialFilter={sp.filter} />
+      )}
     </>
   );
 }

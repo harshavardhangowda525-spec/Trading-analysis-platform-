@@ -58,6 +58,7 @@ export interface Workspace {
   strategies: string[];
   dashboardLayout: string[];
   dataQuality: DataQuality;
+  setup: { kiteApp: boolean; totp: boolean; riskCustomized: boolean };
 }
 
 export const DEMO_COOKIE = "tradeos_demo";
@@ -100,6 +101,7 @@ function buildDemo(): Workspace {
     notifications,
     strategies: [...new Set([...journal.values()].map((j) => j.strategy).filter(Boolean) as string[])],
     dashboardLayout: [],
+    setup: { kiteApp: false, totp: false, riskCustomized: false },
     dataQuality: {
       status: "partial",
       executions: executions.length,
@@ -121,7 +123,7 @@ function buildDemo(): Workspace {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 async function buildLive(userId: string, email: string | null): Promise<Workspace> {
   const q = db();
-  const [tradesR, costsR, journalR, posR, riskR, prefsR, connR, notifR, stratR, batchR, syncR, execCountR] = await Promise.all([
+  const [tradesR, costsR, journalR, posR, riskR, prefsR, connR, notifR, stratR, batchR, syncR, execCountR, setupR] = await Promise.all([
     q`select * from closed_trades where user_id = ${userId} and calc_version = ${CALC_VERSION} and is_demo = false order by exit_at asc limit 20000`,
     q`select c.closed_trade_id, c.component, c.amount, c.source from trade_costs c where c.user_id = ${userId}`,
     q`select j.*, s.name as strategy_name from journal_entries j left join trade_strategies s on s.id = j.strategy_id where j.user_id = ${userId}`,
@@ -134,6 +136,9 @@ async function buildLive(userId: string, email: string | null): Promise<Workspac
     q`select * from broker_import_batches where user_id = ${userId} order by created_at desc limit 10`,
     q`select * from broker_sync_runs where user_id = ${userId} order by started_at desc limit 1`,
     q`select count(*)::int as n from raw_executions where user_id = ${userId} and is_demo = false`,
+    q`select u.totp_enabled, exists(select 1 from kite_apps k where k.user_id = u.id) as kite_app,
+             coalesce((select r.updated_at > r_created.created_at + interval '1 second' from risk_settings r cross join (select created_at from users where id = ${userId}) r_created where r.user_id = ${userId}), false) as risk_customized
+      from users u where u.id = ${userId}`,
   ]);
   const costsBy = new Map<string, CostLine[]>();
   for (const c of costsR as any[]) {
@@ -166,7 +171,10 @@ async function buildLive(userId: string, email: string | null): Promise<Workspac
     journal,
     risk: rowToRisk(riskR[0] ?? null),
     connection: {
-      status: (c?.status as ConnectionStatus) ?? "disconnected",
+      // A stored session past Zerodha's daily 06:00 IST logout is shown as "reconnect required"
+      status: (c && ["connected", "updated", "partial", "synchronizing"].includes(c.status) && c.token_expires_at && new Date(c.token_expires_at).getTime() < Date.now()
+        ? "reconnect_required"
+        : (c?.status as ConnectionStatus)) ?? "disconnected",
       brokerUserId: c?.broker_user_id ?? null,
       brokerUserName: c?.broker_user_name ?? null,
       lastSyncedAt: iso(c?.last_synced_at),
@@ -176,6 +184,11 @@ async function buildLive(userId: string, email: string | null): Promise<Workspac
     notifications: (notifR as any[]).map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, createdAt: iso(n.created_at)!, readAt: iso(n.read_at), href: n.data?.href })),
     strategies: (stratR as any[]).map((x) => x.name),
     dashboardLayout: prefs?.dashboard_layout ?? [],
+    setup: {
+      kiteApp: Boolean((setupR[0] as any)?.kite_app) || Boolean(process.env.KITE_API_KEY && process.env.KITE_API_SECRET),
+      totp: Boolean((setupR[0] as any)?.totp_enabled),
+      riskCustomized: Boolean((setupR[0] as any)?.risk_customized),
+    },
     dataQuality: {
       status,
       executions: execCount,

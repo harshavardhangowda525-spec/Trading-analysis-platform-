@@ -1,7 +1,8 @@
 import { after, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { clientIp, requireUser } from "@/lib/api";
-import { env, serverEnv } from "@/lib/env";
+import { env } from "@/lib/env";
+import { getKiteCreds } from "@/lib/kite/credentials";
 import { audit } from "@/lib/data/pipeline";
 import { KiteApiError, KiteClient } from "@/lib/kite/client";
 import { syncUser, tokenExpiry } from "@/lib/kite/sync";
@@ -26,11 +27,12 @@ export async function GET(req: Request) {
 
   const a = await requireUser();
   if ("res" in a) return NextResponse.redirect(new URL("/login", env.appUrl));
-  const { kiteApiKey, kiteApiSecret } = serverEnv();
+  const creds = await getKiteCreds(a.user.userId);
+  if (!creds) return back("error=kite_not_configured");
 
   try {
-    const session = await new KiteClient(kiteApiKey, null).generateSession(requestToken, kiteApiSecret);
-    const kite = new KiteClient(kiteApiKey, session.access_token);
+    const session = await new KiteClient(creds.apiKey, null).generateSession(requestToken, creds.apiSecret);
+    const kite = new KiteClient(creds.apiKey, session.access_token);
     const profile = await kite.profile(); // validates the account/session
     const q = db();
     const uid = a.user.userId;

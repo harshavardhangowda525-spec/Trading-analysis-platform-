@@ -2,18 +2,19 @@ import { z } from "zod";
 import { fail, json, requireUser } from "@/lib/api";
 import { db } from "@/lib/db";
 
-const TZ = (() => {
+const validTz = (t: string) => {
   try {
-    return new Set(Intl.supportedValuesOf("timeZone"));
+    new Intl.DateTimeFormat("en-US", { timeZone: t });
+    return t.length < 64;
   } catch {
-    return new Set(["Asia/Kolkata", "UTC"]);
+    return false;
   }
-})();
+};
 
 const Body = z
   .object({
     dashboard_layout: z.array(z.string().regex(/^-?[a-z]+$/).max(30)).max(30).optional(),
-    timezone: z.string().refine((t) => TZ.has(t), "unknown timezone").optional(),
+    timezone: z.string().refine(validTz, "unknown timezone").optional(),
     week_start: z.number().int().min(0).max(6).optional(),
     data_mode: z.enum(["live", "demo"]).optional(),
     email_reports: z.boolean().optional(),

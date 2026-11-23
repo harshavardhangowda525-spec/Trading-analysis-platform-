@@ -19,3 +19,15 @@ export const isDbConfigured = () => Boolean(process.env.DATABASE_URL);
 
 /** Normalise driver values: timestamps -> ISO strings. */
 export const iso = (v: unknown): string | null => (v == null ? null : v instanceof Date ? v.toISOString() : new Date(String(v)).toISOString());
+
+/**
+ * Atomically claim a named job if it hasn't run within `minutes`.
+ * Returns true for exactly one caller per window (safe across instances).
+ */
+export async function claimJob(name: string, minutes: number): Promise<boolean> {
+  const rows = await db()`insert into job_runs (name, last_run_at) values (${name}, now())
+                          on conflict (name) do update set last_run_at = now()
+                          where job_runs.last_run_at < now() - make_interval(mins => ${minutes})
+                          returning name`;
+  return rows.length > 0;
+}

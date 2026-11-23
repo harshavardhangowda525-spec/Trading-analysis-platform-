@@ -4,7 +4,7 @@ import { getWorkspace } from "@/lib/data/workspace";
 import { filterTrades, parseRange } from "@/lib/data/range";
 import { behaviorAnalysis, breakdowns, computeMetrics, drawdownSeries, histogram, plannedRisk, type Bucket } from "@/lib/engine/metrics";
 import { CategoryBars, DrawdownChart, EquityCurve, Histogram, HorizontalPnl, MonthlyHeatmap, PnlBars, PnlCalendar, RRScatter } from "@/components/charts/Charts";
-import { Badge, Empty, PageTitle, Panel, PanelHeader, Pnl } from "@/components/ui/primitives";
+import { Badge, Empty, PageTitle, Panel, PanelHeader, Pnl, buttonClass } from "@/components/ui/primitives";
 import { cn, duration, inr, pct } from "@/lib/utils";
 
 export const metadata = { title: "Analytics Lab" };
@@ -37,7 +37,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         ))}
       </nav>
       {!trades.length ? (
-        <Panel><Empty title="No closed trades in this range" body="Choose a wider date range." /></Panel>
+        <Panel>{ws.trades.length ? <Empty title="No closed trades in this range" body="Choose a wider date range." /> : <Empty title="No trades recorded yet" body="Analytics fill in automatically after your first completed trade is synced from Zerodha." action={<Link href="/broker" className={buttonClass("primary")}>Connect Zerodha</Link>} />}</Panel>
       ) : tab === "charts" ? (
         <ChartsTab />
       ) : tab === "time" ? (

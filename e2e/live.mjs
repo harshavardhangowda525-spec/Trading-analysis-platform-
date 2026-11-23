@@ -43,6 +43,27 @@ try {
     const r2 = await post(a, "/api/auth/signup", { email: `weak-${stamp}@tradeos.test`, password: "short" });
     assert.equal(r2.status, 400); void r;
   });
+  await step("getting-started checklist and Kite app setup → Connect goes to official Zerodha login", async () => {
+    await a.goto(`${base}/`, { waitUntil: "networkidle" });
+    await a.waitForSelector("text=Set up TRADEOS");
+    assert.equal((await post(a, "/api/broker/zerodha/app", { apiKey: "bad key!", apiSecret: "x" })).status, 400);
+    assert.equal((await post(a, "/api/broker/zerodha/app", { apiKey: "testkey1234abcd", apiSecret: "testsecret1234567890abcd" })).status, 200);
+    const st = await api(a, "/api/broker/zerodha/app");
+    assert.equal(st.body.configured, true);
+    assert.ok(!JSON.stringify(st.body).includes("testsecret"), "secret must never be returned");
+    const r = await a.request.get(`${base}/api/broker/zerodha/login`, { maxRedirects: 0 });
+    const loc = r.headers()["location"] ?? "";
+    assert.ok(loc.startsWith("https://kite.zerodha.com/connect/login"), loc);
+    assert.ok(loc.includes("api_key=testkey1234abcd"));
+    await a.goto(`${base}/broker`, { waitUntil: "networkidle" });
+    await a.waitForSelector("text=Saved");
+    await a.waitForSelector("text=Connect Zerodha");
+  });
+  await step("settings default timezone is Asia/Kolkata and health endpoint is up", async () => {
+    await a.goto(`${base}/settings`, { waitUntil: "networkidle" });
+    assert.equal(await a.locator(`select:has(option:text-is("Asia/Kolkata"))`).first().inputValue(), "Asia/Kolkata");
+    assert.equal((await api(a, "/api/health")).status, 200);
+  });
   let tradeKey;
   await step("A imports tradebook → trades persisted", async () => {
     const r = await importCsv(a);
